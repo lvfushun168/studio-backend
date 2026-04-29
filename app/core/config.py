@@ -4,13 +4,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Gemini WebAPI Backend"
+    app_name: str = "studio_asset_system Backend"
     app_env: str = "development"
     app_debug: bool = True
-    database_url: str = "sqlite:///./app.db"
+    database_url: str = "postgresql+psycopg://lvfushun@127.0.0.1:5432/studio_asset_system"
     media_root: str = "./storage"
     cookie_encryption_key: str = ""
-    default_model: str = "gemini-3-pro"
+    default_model: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

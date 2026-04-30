@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.auth import CurrentUser, require_project_access
 from app.core.database import get_db
 from app.models.scene import Scene, StageProgress
 from app.models.project import Project
@@ -10,10 +11,15 @@ router = APIRouter()
 
 
 @router.get("/projects/{project_id}")
-def get_project_progress(project_id: int, db: Session = Depends(get_db)) -> dict:
+def get_project_progress(
+    project_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> dict:
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    require_project_access(project_id, current_user, db)
 
     scene_stmt = select(Scene).where(Scene.project_id == project_id)
     scenes = db.scalars(scene_stmt).all()
@@ -33,25 +39,29 @@ def get_project_progress(project_id: int, db: Session = Depends(get_db)) -> dict
             if sp.status in stage_counts[sp.stage_key]:
                 stage_counts[sp.stage_key][sp.status] += 1
 
-        # 计算已完成镜头（final approved）
         for s in scenes:
             final_sp = next((sp for sp in progresses if sp.scene_id == s.id and sp.stage_key == "final"), None)
             if final_sp and final_sp.status == "approved":
                 completed_scenes += 1
 
     return {
-        "project_id": project_id,
-        "total_scenes": total_scenes,
-        "completed_scenes": completed_scenes,
-        "stage_counts": stage_counts,
+        "projectId": project_id,
+        "totalScenes": total_scenes,
+        "completedScenes": completed_scenes,
+        "stageCounts": stage_counts,
     }
 
 
 @router.get("/projects/{project_id}/overview")
-def get_project_overview(project_id: int, db: Session = Depends(get_db)) -> dict:
+def get_project_overview(
+    project_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> dict:
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    require_project_access(project_id, current_user, db)
 
     from app.models.asset import Asset
     from app.models.bank import BankMaterial, BankReference
@@ -64,11 +74,11 @@ def get_project_overview(project_id: int, db: Session = Depends(get_db)) -> dict
     total_bank_references = db.scalar(select(func.count(BankReference.id)).where(BankReference.project_id == project_id)) or 0
 
     return {
-        "project_id": project_id,
-        "project_name": project.name,
-        "total_scenes": total_scenes,
-        "total_assets": total_assets,
-        "total_annotations": total_annotations,
-        "total_bank_materials": total_bank_materials,
-        "total_bank_references": total_bank_references,
+        "projectId": project_id,
+        "projectName": project.name,
+        "totalScenes": total_scenes,
+        "totalAssets": total_assets,
+        "totalAnnotations": total_annotations,
+        "totalBankMaterials": total_bank_materials,
+        "totalBankReferences": total_bank_references,
     }

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from app.schemas.common import TimestampedRead
+from app.schemas.common import CamelCaseORMModel
 
 
 class EpisodeCreate(BaseModel):
@@ -9,7 +9,7 @@ class EpisodeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
 
-class EpisodeRead(TimestampedRead):
+class EpisodeRead(CamelCaseORMModel):
     id: int
     project_id: int
     episode_number: int

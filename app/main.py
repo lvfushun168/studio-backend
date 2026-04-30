@@ -6,14 +6,13 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.config import settings
-from app.db.init_db import init_db
 
 settings.media_root_path.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    init_db()
+    # Database is managed by Alembic migrations; do NOT create_all here.
     yield
 
 

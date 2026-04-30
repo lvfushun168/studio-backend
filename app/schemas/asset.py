@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
-from app.schemas.common import TimestampedRead
+from app.schemas.common import CamelCaseORMModel
 
 
-class AssetAttachmentRead(TimestampedRead):
+class AssetAttachmentRead(CamelCaseORMModel):
     id: int
     asset_id: int
     filename: str
@@ -28,12 +28,12 @@ class AssetCreate(BaseModel):
     metadata_json: dict | None = None
 
 
-class AssetRead(TimestampedRead):
+class AssetRead(CamelCaseORMModel):
     id: int
     project_id: int
     scene_group_id: int | None
     scene_id: int | None
-    stage_key: str
+    stage_key: str = Field(serialization_alias="type")
     asset_type: str
     media_type: str
     bank_material_id: int | None
@@ -43,13 +43,13 @@ class AssetRead(TimestampedRead):
     original_name: str
     extension: str | None
     storage_path: str
-    public_url: str | None
+    public_url: str | None = Field(serialization_alias="url")
     thumbnail_path: str | None
     thumbnail_url: str | None
     version: int
     note: str | None
     metadata_json: dict | None
-    uploaded_by: int
+    uploaded_by: int = Field(serialization_alias="userId")
     attachments: list[AssetAttachmentRead] = []
 
 

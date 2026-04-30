@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from app.schemas.common import TimestampedRead
+from app.schemas.common import CamelCaseORMModel
 
 
 class SceneGroupCreate(BaseModel):
@@ -10,7 +10,7 @@ class SceneGroupCreate(BaseModel):
     sort_order: int = 0
 
 
-class SceneGroupRead(TimestampedRead):
+class SceneGroupRead(CamelCaseORMModel):
     id: int
     project_id: int
     episode_id: int | None

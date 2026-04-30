@@ -2,33 +2,39 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.auth import CurrentUser, generate_api_key, require_project_access
 from app.core.database import get_db
+from app.models.project import UserProjectMembership
 from app.models.user import User
-from app.schemas.user import UserCreate, UserRead
+from app.schemas.user import UserCreate, UserMeRead, UserRead
 
 router = APIRouter()
 
 
-@router.get("/me", response_model=UserRead)
-def get_current_user(db: Session = Depends(get_db)) -> User:
-    stmt = select(User).where(User.role == "admin").order_by(User.id)
-    user = db.scalar(stmt)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No user found")
-    return user
+@router.get("/me", response_model=UserMeRead)
+def get_current_user_me(current_user: CurrentUser) -> User:
+    return current_user
 
 
 @router.get("", response_model=list[UserRead])
-def list_users(project_id: int | None = None, db: Session = Depends(get_db)) -> list[User]:
+def list_users(
+    project_id: int | None = None,
+    role: str | None = None,
+    current_user: CurrentUser = None,
+    db: Session = Depends(get_db),
+) -> list[User]:
     stmt = select(User).order_by(User.id)
     if project_id is not None:
-        from app.models.project import UserProjectMembership
+        if current_user and current_user.role != "admin":
+            require_project_access(project_id, current_user, db)
         stmt = (
             select(User)
             .join(UserProjectMembership, UserProjectMembership.user_id == User.id)
             .where(UserProjectMembership.project_id == project_id)
             .order_by(User.id)
         )
+    if role is not None:
+        stmt = stmt.where(User.role == role)
     return list(db.scalars(stmt).all())
 
 
@@ -47,6 +53,7 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> User:
         display_name=payload.display_name,
         email=payload.email,
         role=payload.role,
+        api_key=generate_api_key(),
         is_active=payload.is_active,
     )
     db.add(user)

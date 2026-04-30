@@ -2,10 +2,10 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.schemas.common import TimestampedRead
+from app.schemas.common import CamelCaseORMModel
 
 
-class AnnotationAttachmentRead(TimestampedRead):
+class AnnotationAttachmentRead(CamelCaseORMModel):
     id: int
     annotation_id: int
     filename: str
@@ -18,25 +18,23 @@ class AnnotationAttachmentRead(TimestampedRead):
 class AnnotationCreate(BaseModel):
     project_id: int
     target_asset_id: int
-    target_version: int
-    author_id: int
-    author_role: str = "director"
+    target_version: int | None = None
     frame_number: int | None = None
     timestamp_seconds: float | None = None
-    canvas_json: dict
+    canvas_json: dict | None = None
     summary: str | None = None
 
 
-class AnnotationRead(TimestampedRead):
+class AnnotationRead(CamelCaseORMModel):
     id: int
     project_id: int
     target_asset_id: int
-    target_version: int
+    target_version: int | None
     author_id: int
     author_role: str
     frame_number: int | None
     timestamp_seconds: float | None
-    canvas_json: dict
+    canvas_json: dict | None
     overlay_path: str | None
     overlay_url: str | None
     merged_path: str | None

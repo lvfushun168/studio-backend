@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
-from app.schemas.common import TimestampedRead
+from app.schemas.common import CamelCaseORMModel
 
 
 class ProjectCreate(BaseModel):
@@ -20,16 +20,22 @@ class ProjectUpdate(BaseModel):
     deadline_at: datetime | None = None
 
 
-class ProjectMemberRead(BaseModel):
+class ProjectMemberRead(CamelCaseORMModel):
     user_id: int
     role_in_project: str | None
 
 
-class ProjectRead(TimestampedRead):
+class ProjectRead(CamelCaseORMModel):
     id: int
     name: str
     description: str | None
-    project_type: str
+    project_type: str = Field(serialization_alias="type")
     status: str
     deadline_at: datetime | None
     created_by: int | None
+    members: list[ProjectMemberRead] = []
+
+    @computed_field
+    @property
+    def member_ids(self) -> list[int]:
+        return [m.user_id for m in self.members]

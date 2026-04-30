@@ -2,10 +2,10 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.schemas.common import ORMModel
+from app.schemas.common import CamelCaseORMModel
 
 
-class ReviewRecordRead(ORMModel):
+class ReviewRecordRead(CamelCaseORMModel):
     id: int
     project_id: int
     scene_id: int
@@ -22,16 +22,17 @@ class ReviewRecordRead(ORMModel):
 
 class SubmitRequest(BaseModel):
     stage_key: str
-    user_id: int
 
 
 class ApproveRequest(BaseModel):
     stage_key: str
-    user_id: int
     comment: str | None = None
 
 
 class RejectRequest(BaseModel):
     stage_key: str
-    user_id: int
     comment: str | None = None
+
+
+class ResubmitRequest(BaseModel):
+    stage_key: str

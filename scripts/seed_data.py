@@ -3,8 +3,9 @@
 
 from sqlalchemy import text
 
-from app.core.database import SessionLocal, engine
+from app.core.auth import generate_api_key
 from app.core.database import Base
+from app.core.database import SessionLocal, engine
 from app.domains.stage_templates import build_default_stage_progress
 from app.models.annotation import Annotation
 from app.models.asset import Asset
@@ -53,14 +54,14 @@ def seed() -> None:
 
         # 1. Users
         users = [
-            User(username="admin", display_name="系统管理员", email="admin@studio.com", role="admin", is_active=True),
-            User(username="director1", display_name="导演A", email="director.a@studio.com", role="director", is_active=True),
-            User(username="director2", display_name="导演B", email="director.b@studio.com", role="director", is_active=True),
-            User(username="producer1", display_name="制片人小王", email="producer@studio.com", role="producer", is_active=True),
-            User(username="artist1", display_name="画师小红", email="artist.red@studio.com", role="artist", is_active=True),
-            User(username="artist2", display_name="画师小明", email="artist.ming@studio.com", role="artist", is_active=True),
-            User(username="artist3", display_name="画师小蓝", email="artist.blue@studio.com", role="artist", is_active=True),
-            User(username="visitor1", display_name="访客小张", email="visitor.zhang@studio.com", role="visitor", is_active=True),
+            User(username="admin", display_name="系统管理员", email="admin@studio.com", role="admin", api_key=generate_api_key(), is_active=True),
+            User(username="director1", display_name="导演A", email="director.a@studio.com", role="director", api_key=generate_api_key(), is_active=True),
+            User(username="director2", display_name="导演B", email="director.b@studio.com", role="director", api_key=generate_api_key(), is_active=True),
+            User(username="producer1", display_name="制片人小王", email="producer@studio.com", role="producer", api_key=generate_api_key(), is_active=True),
+            User(username="artist1", display_name="画师小红", email="artist.red@studio.com", role="artist", api_key=generate_api_key(), is_active=True),
+            User(username="artist2", display_name="画师小明", email="artist.ming@studio.com", role="artist", api_key=generate_api_key(), is_active=True),
+            User(username="artist3", display_name="画师小蓝", email="artist.blue@studio.com", role="artist", api_key=generate_api_key(), is_active=True),
+            User(username="visitor1", display_name="访客小张", email="visitor.zhang@studio.com", role="visitor", api_key=generate_api_key(), is_active=True),
         ]
         db.add_all(users)
         db.flush()

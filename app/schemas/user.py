@@ -10,6 +10,7 @@ class UserCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=128)
     email: str | None = None
     role: str = "artist"
+    password: str | None = None
     is_active: bool = True
 
 
@@ -23,7 +24,7 @@ class UserRead(TimestampedRead):
 
 
 class UserMeRead(UserRead):
-    pass
+    api_key: str | None = None
 
 
 class UserLogin(BaseModel):

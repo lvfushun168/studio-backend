@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.auth import CurrentUser, require_project_access
 from app.core.database import get_db
 from app.models.reference import Reference
 from app.schemas.reference import ReferenceCreate, ReferenceRead
@@ -16,6 +17,7 @@ def list_references(
     source_id: int | None = None,
     target_type: str | None = None,
     target_id: int | None = None,
+    current_user: CurrentUser = None,
     db: Session = Depends(get_db),
 ) -> list[Reference]:
     stmt = select(Reference).order_by(Reference.id.desc())
@@ -33,7 +35,12 @@ def list_references(
 
 
 @router.post("", response_model=ReferenceRead, status_code=status.HTTP_201_CREATED)
-def create_reference(payload: ReferenceCreate, db: Session = Depends(get_db)) -> Reference:
+def create_reference(
+    payload: ReferenceCreate,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> Reference:
+    require_project_access(payload.project_id, current_user, db)
     ref = Reference(
         project_id=payload.project_id,
         source_type=payload.source_type,
@@ -41,7 +48,7 @@ def create_reference(payload: ReferenceCreate, db: Session = Depends(get_db)) ->
         target_type=payload.target_type,
         target_id=payload.target_id,
         relation_type=payload.relation_type,
-        created_by=1,
+        created_by=current_user.id,
     )
     db.add(ref)
     db.commit()
@@ -50,17 +57,27 @@ def create_reference(payload: ReferenceCreate, db: Session = Depends(get_db)) ->
 
 
 @router.get("/{ref_id}", response_model=ReferenceRead)
-def get_reference(ref_id: int, db: Session = Depends(get_db)) -> Reference:
+def get_reference(
+    ref_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> Reference:
     ref = db.get(Reference, ref_id)
     if not ref:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reference not found")
+    require_project_access(ref.project_id, current_user, db)
     return ref
 
 
 @router.delete("/{ref_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_reference(ref_id: int, db: Session = Depends(get_db)) -> None:
+def delete_reference(
+    ref_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> None:
     ref = db.get(Reference, ref_id)
     if not ref:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reference not found")
+    require_project_access(ref.project_id, current_user, db)
     db.delete(ref)
     db.commit()

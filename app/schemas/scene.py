@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
-from app.schemas.common import TimestampedRead
+from app.schemas.common import CamelCaseORMModel
 
 
-class StageProgressRead(TimestampedRead):
+class StageProgressRead(CamelCaseORMModel):
     id: int
     project_id: int
     scene_id: int
@@ -20,7 +20,7 @@ class StageProgressRead(TimestampedRead):
     rejected_at: datetime | None
 
 
-class SceneAssignmentRead(BaseModel):
+class SceneAssignmentRead(CamelCaseORMModel):
     id: int
     scene_id: int
     user_id: int
@@ -54,7 +54,7 @@ class SceneUpdate(BaseModel):
     base_scene_id: int | None = None
 
 
-class SceneRead(TimestampedRead):
+class SceneRead(CamelCaseORMModel):
     id: int
     project_id: int
     scene_group_id: int
@@ -70,3 +70,32 @@ class SceneRead(TimestampedRead):
     created_by: int | None
     stage_progresses: list[StageProgressRead] = []
     assignments: list[SceneAssignmentRead] = []
+
+    @computed_field
+    @property
+    def stage_progress(self) -> dict[str, dict]:
+        """Convert stage_progresses array to frontend-expected object format."""
+        result: dict[str, dict] = {}
+        for sp in self.stage_progresses:
+            result[sp.stage_key] = {
+                "status": sp.status,
+                "reviewerId": sp.reviewer_id,
+                "reviewedAt": sp.reviewed_at.isoformat() if sp.reviewed_at else None,
+                "comment": sp.comment,
+            }
+        return result
+
+    @computed_field
+    @property
+    def assigned_user_ids(self) -> list[int]:
+        """Extract unique user IDs from assignments."""
+        return list({a.user_id for a in self.assignments})
+
+
+class SceneSortItem(BaseModel):
+    scene_id: int
+    sort_order: int
+
+
+class SceneBatchSortRequest(BaseModel):
+    items: list[SceneSortItem]

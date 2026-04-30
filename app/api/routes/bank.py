@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.auth import CurrentUser, require_project_access
 from app.core.database import get_db
 from app.models.bank import BankMaterial, BankReference
 from app.schemas.bank import BankMaterialCreate, BankMaterialRead, BankReferenceCreate, BankReferenceRead
@@ -16,6 +17,7 @@ def list_bank_materials(
     project_id: int | None = None,
     character_name: str | None = None,
     part_name: str | None = None,
+    current_user: CurrentUser = None,
     db: Session = Depends(get_db),
 ) -> list[BankMaterial]:
     stmt = select(BankMaterial).order_by(BankMaterial.id.desc())
@@ -29,7 +31,12 @@ def list_bank_materials(
 
 
 @router.post("/materials", response_model=BankMaterialRead, status_code=status.HTTP_201_CREATED)
-def create_bank_material(payload: BankMaterialCreate, db: Session = Depends(get_db)) -> BankMaterial:
+def create_bank_material(
+    payload: BankMaterialCreate,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> BankMaterial:
+    require_project_access(payload.project_id, current_user, db)
     material = BankMaterial(
         project_id=payload.project_id,
         source_asset_id=payload.source_asset_id,
@@ -41,7 +48,7 @@ def create_bank_material(payload: BankMaterialCreate, db: Session = Depends(get_
         pose=payload.pose,
         angle=payload.angle,
         current_version=1,
-        created_by=1,
+        created_by=current_user.id,
     )
     db.add(material)
     db.commit()
@@ -50,18 +57,28 @@ def create_bank_material(payload: BankMaterialCreate, db: Session = Depends(get_
 
 
 @router.get("/materials/{material_id}", response_model=BankMaterialRead)
-def get_bank_material(material_id: int, db: Session = Depends(get_db)) -> BankMaterial:
+def get_bank_material(
+    material_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> BankMaterial:
     material = db.get(BankMaterial, material_id)
     if not material:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankMaterial not found")
+    require_project_access(material.project_id, current_user, db)
     return material
 
 
 @router.delete("/materials/{material_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_bank_material(material_id: int, db: Session = Depends(get_db)) -> None:
+def delete_bank_material(
+    material_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> None:
     material = db.get(BankMaterial, material_id)
     if not material:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankMaterial not found")
+    require_project_access(material.project_id, current_user, db)
     db.delete(material)
     db.commit()
 
@@ -72,6 +89,7 @@ def delete_bank_material(material_id: int, db: Session = Depends(get_db)) -> Non
 def list_bank_references(
     scene_id: int | None = None,
     bank_material_id: int | None = None,
+    current_user: CurrentUser = None,
     db: Session = Depends(get_db),
 ) -> list[BankReference]:
     stmt = select(BankReference).order_by(BankReference.id.desc())
@@ -83,7 +101,12 @@ def list_bank_references(
 
 
 @router.post("/references", response_model=BankReferenceRead, status_code=status.HTTP_201_CREATED)
-def create_bank_reference(payload: BankReferenceCreate, db: Session = Depends(get_db)) -> BankReference:
+def create_bank_reference(
+    payload: BankReferenceCreate,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> BankReference:
+    require_project_access(payload.project_id, current_user, db)
     ref = BankReference(
         bank_material_id=payload.bank_material_id,
         project_id=payload.project_id,
@@ -91,7 +114,7 @@ def create_bank_reference(payload: BankReferenceCreate, db: Session = Depends(ge
         stage_key=payload.stage_key,
         version=payload.version,
         status="active",
-        created_by=1,
+        created_by=current_user.id,
     )
     db.add(ref)
     db.commit()
@@ -100,17 +123,27 @@ def create_bank_reference(payload: BankReferenceCreate, db: Session = Depends(ge
 
 
 @router.get("/references/{reference_id}", response_model=BankReferenceRead)
-def get_bank_reference(reference_id: int, db: Session = Depends(get_db)) -> BankReference:
+def get_bank_reference(
+    reference_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> BankReference:
     ref = db.get(BankReference, reference_id)
     if not ref:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankReference not found")
+    require_project_access(ref.project_id, current_user, db)
     return ref
 
 
 @router.delete("/references/{reference_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_bank_reference(reference_id: int, db: Session = Depends(get_db)) -> None:
+def delete_bank_reference(
+    reference_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> None:
     ref = db.get(BankReference, reference_id)
     if not ref:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankReference not found")
+    require_project_access(ref.project_id, current_user, db)
     db.delete(ref)
     db.commit()

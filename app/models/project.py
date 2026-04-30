@@ -22,6 +22,10 @@ class Project(TimestampMixin, Base):
     episodes = relationship("Episode", back_populates="project", cascade="all, delete-orphan")
     scene_groups = relationship("SceneGroup", back_populates="project", cascade="all, delete-orphan")
 
+    @property
+    def members(self):
+        return self.memberships
+
 
 class UserProjectMembership(Base):
     __tablename__ = "user_project_memberships"

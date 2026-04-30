@@ -67,6 +67,15 @@ def test_projects_require_authentication(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def test_health_endpoint_reports_database_and_storage(client: TestClient) -> None:
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["database"]["ok"] is True
+    assert payload["storage"]["ok"] is True
+
+
 def test_assets_and_annotations_require_authentication(client: TestClient) -> None:
     asset_response = client.get("/api/v1/assets")
     annotation_response = client.get("/api/v1/annotations")
@@ -141,6 +150,36 @@ def test_assets_are_scoped_to_project_membership(client: TestClient) -> None:
     assert all(item["projectId"] == 1 for item in payload)
 
 
+def test_role_boundaries_for_scene_and_workflow_operations(client: TestClient) -> None:
+    visitor_create_scene = client.post(
+        "/api/v1/scenes",
+        headers={"X-User-ID": "8"},
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "name": "VISITOR_SCENE",
+            "level": "B",
+            "stage_template": "ai_single_frame",
+            "pipeline": "ai_single_frame",
+        },
+    )
+    assert visitor_create_scene.status_code == 403
+
+    producer_approve = client.post(
+        "/api/v1/workflow/scenes/2/approve",
+        headers={"X-User-ID": "4"},
+        json={"stage_key": "ai_draw", "comment": "nope"},
+    )
+    assert producer_approve.status_code == 403
+
+    visitor_submit = client.post(
+        "/api/v1/workflow/scenes/1/submit",
+        headers={"X-User-ID": "8"},
+        json={"stage_key": "correction"},
+    )
+    assert visitor_submit.status_code == 403
+
+
 def test_assets_and_annotations_are_scoped_to_project_membership(client: TestClient) -> None:
     asset_response = client.get("/api/v1/assets", headers={"X-User-ID": "6"})
     annotation_response = client.get("/api/v1/annotations", headers={"X-User-ID": "6"})
@@ -170,6 +209,49 @@ def test_asset_latest_versions_and_attachments_are_returned(client: TestClient) 
     assert versions_response.status_code == 200
     versions = versions_response.json()
     assert [item["version"] for item in versions] == [1, 2]
+
+
+def test_uploading_same_asset_name_creates_new_version(client: TestClient) -> None:
+    headers = {"X-User-ID": "5"}
+    create_response = client.post(
+        "/api/v1/assets",
+        headers=headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "scene_id": 1,
+            "stage_key": "correction",
+            "asset_type": "original",
+            "media_type": "image",
+            "original_name": "same_name_version.png",
+        },
+    )
+    assert create_response.status_code == 201
+    asset = create_response.json()
+
+    img1 = BytesIO()
+    Image.new("RGB", (64, 64), (255, 0, 0)).save(img1, format="PNG")
+    first_upload = client.post(
+        f"/api/v1/upload/assets/{asset['id']}/file",
+        headers=headers,
+        files={"file": ("same_name_version.png", img1.getvalue(), "image/png")},
+    )
+    assert first_upload.status_code == 200
+    assert first_upload.json()["version"] == 1
+
+    img2 = BytesIO()
+    Image.new("RGB", (64, 64), (0, 255, 0)).save(img2, format="PNG")
+    second_upload = client.post(
+        f"/api/v1/upload/assets/{asset['id']}/file",
+        headers=headers,
+        files={"file": ("same_name_version.png", img2.getvalue(), "image/png")},
+    )
+    assert second_upload.status_code == 200
+    assert second_upload.json()["version"] == 2
+
+    versions_response = client.get(f"/api/v1/assets/{second_upload.json()['asset_id']}/versions", headers=headers)
+    assert versions_response.status_code == 200
+    assert [item["version"] for item in versions_response.json()] == [1, 2]
 
 
 def test_scene_matrix_returns_flattened_scenes_and_latest_assets(client: TestClient) -> None:
@@ -521,3 +603,71 @@ def test_submit_review_notifies_only_admin_director_and_producer(client: TestCli
     assert any(item["type"] == "review_required" and item["payloadJson"]["scene_id"] == 1 for item in producer_notifications.json())
     assert not any(item["type"] == "review_required" and item["payloadJson"]["scene_id"] == 1 for item in artist_notifications.json())
     assert not any(item["type"] == "review_required" and item["payloadJson"]["scene_id"] == 1 for item in visitor_notifications.json())
+
+
+def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) -> None:
+    create_scene = client.post(
+        "/api/v1/scenes",
+        headers={"X-User-ID": "2"},
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "name": f"FLOW_{uuid.uuid4().hex[:6]}",
+            "description": "workflow regression",
+            "level": "B",
+            "stage_template": "ai_single_frame",
+            "pipeline": "ai_single_frame",
+            "frame_count": 1,
+            "sort_order": 999,
+        },
+    )
+    assert create_scene.status_code == 201
+    scene_id = create_scene.json()["id"]
+
+    submit_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/submit",
+        headers={"X-User-ID": "5"},
+        json={"stage_key": "storyboard"},
+    )
+    assert submit_response.status_code == 200
+    submit_record = submit_response.json()[0]
+    assert submit_record["action"] == "submit"
+    assert submit_record["toStatus"] == "reviewing"
+
+    approve_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/approve",
+        headers={"X-User-ID": "2"},
+        json={"stage_key": "storyboard", "comment": "approved"},
+    )
+    assert approve_response.status_code == 200
+    approve_records = approve_response.json()
+    assert any(item["action"] == "approve" and item["toStatus"] == "approved" for item in approve_records)
+
+    scene_after_approve = client.get(f"/api/v1/scenes/{scene_id}", headers={"X-User-ID": "2"})
+    assert scene_after_approve.status_code == 200
+    assert scene_after_approve.json()["stageProgress"]["ai_draw"]["status"] == "pending"
+
+    submit_final = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/submit",
+        headers={"X-User-ID": "5"},
+        json={"stage_key": "ai_draw"},
+    )
+    assert submit_final.status_code == 200
+
+    reject_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/reject",
+        headers={"X-User-ID": "2"},
+        json={"stage_key": "ai_draw", "comment": "fix ai draw"},
+    )
+    assert reject_response.status_code == 200
+    reject_records = reject_response.json()
+    assert any(item["action"] == "reject" and item["toStatus"] == "rejected" for item in reject_records)
+    assert any(item["action"] == "rollback" and item["stageKey"] == "storyboard" for item in reject_records)
+
+    resubmit_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/resubmit",
+        headers={"X-User-ID": "5"},
+        json={"stage_key": "ai_draw"},
+    )
+    assert resubmit_response.status_code == 200
+    assert resubmit_response.json()["action"] == "resubmit"

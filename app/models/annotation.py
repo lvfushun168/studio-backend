@@ -1,6 +1,6 @@
 from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.mixins import TimestampMixin
@@ -24,6 +24,8 @@ class Annotation(TimestampMixin, Base):
     merged_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    attachments = relationship("AnnotationAttachment", back_populates="annotation", cascade="all, delete-orphan")
+
 
 class AnnotationAttachment(TimestampMixin, Base):
     __tablename__ = "annotation_attachments"
@@ -36,3 +38,5 @@ class AnnotationAttachment(TimestampMixin, Base):
     public_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(nullable=True)
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    annotation = relationship("Annotation", back_populates="attachments")

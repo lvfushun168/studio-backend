@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.auth import (
     CurrentUser,
     require_project_access,
+    DIRECTOR_ROLES,
     DIRECTOR_PRODUCER_ROLES,
     ARTIST_ROLES,
     require_role,
@@ -15,6 +16,7 @@ from app.core.auth import (
 from app.core.database import get_db
 from app.domains.stage_templates import build_default_stage_progress
 from app.models.project import SceneAssignment, SceneGroup
+from app.models.asset import Asset
 from app.models.scene import Scene, StageProgress
 from app.schemas.scene import (
     SceneAssignmentRead,
@@ -44,11 +46,70 @@ def get_scene_matrix(
     )
     scenes = list(db.scalars(stmt).all())
     groups_stmt = select(SceneGroup).where(SceneGroup.project_id == project_id).order_by(SceneGroup.sort_order)
-    groups = {g.id: {"id": g.id, "name": g.name, "scenes": []} for g in db.scalars(groups_stmt).all()}
+    group_rows = list(db.scalars(groups_stmt).all())
+    groups = {
+        g.id: {
+            "id": g.id,
+            "name": g.name,
+            "projectId": g.project_id,
+            "episodeId": g.episode_id,
+            "sortOrder": g.sort_order,
+            "scenes": [],
+        }
+        for g in group_rows
+    }
     for s in scenes:
         if s.scene_group_id in groups:
             groups[s.scene_group_id]["scenes"].append(SceneRead.model_validate(s).model_dump(by_alias=True))
-    return {"projectId": project_id, "groups": list(groups.values())}
+
+    latest_assets_stmt = (
+        select(Asset)
+        .where(Asset.project_id == project_id)
+        .order_by(
+            Asset.scene_id.asc().nulls_last(),
+            Asset.scene_group_id.asc().nulls_last(),
+            Asset.stage_key.asc(),
+            Asset.asset_type.asc(),
+            Asset.original_name.asc(),
+            Asset.version.desc(),
+            Asset.id.desc(),
+        )
+    )
+    latest_assets_map: dict[int, dict[str, dict]] = {}
+    seen_keys: set[tuple[int, str, str, str]] = set()
+    for asset in db.scalars(latest_assets_stmt).all():
+        if asset.scene_id is None:
+            continue
+        group_key = (asset.scene_id, asset.stage_key, asset.asset_type, asset.original_name)
+        if group_key in seen_keys:
+            continue
+        seen_keys.add(group_key)
+        latest_assets_map.setdefault(asset.scene_id, {}).setdefault(asset.stage_key, {
+            "id": asset.id,
+            "type": asset.stage_key,
+            "assetType": asset.asset_type,
+            "mediaType": asset.media_type,
+            "filename": asset.filename,
+            "originalName": asset.original_name,
+            "url": asset.public_url,
+            "thumbnailUrl": asset.thumbnail_url,
+            "version": asset.version,
+            "userId": asset.uploaded_by,
+            "note": asset.note,
+            "isGlobal": asset.is_global,
+            "createdAt": asset.created_at.isoformat(),
+        })
+
+    scene_payloads = [SceneRead.model_validate(s).model_dump(by_alias=True) for s in scenes]
+    for item in scene_payloads:
+        item["latestAssets"] = latest_assets_map.get(item["id"], {})
+
+    return {
+        "projectId": project_id,
+        "groups": list(groups.values()),
+        "sceneGroups": list(groups.values()),
+        "scenes": scene_payloads,
+    }
 
 
 @router.get("", response_model=list[SceneRead])

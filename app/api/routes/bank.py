@@ -11,7 +11,13 @@ from app.core.auth import (
 )
 from app.core.database import get_db
 from app.models.bank import BankMaterial, BankReference
-from app.schemas.bank import BankMaterialCreate, BankMaterialRead, BankReferenceCreate, BankReferenceRead
+from app.schemas.bank import (
+    BankMaterialCreate,
+    BankMaterialRead,
+    BankReferenceCreate,
+    BankReferenceDetach,
+    BankReferenceRead,
+)
 
 router = APIRouter()
 
@@ -127,16 +133,20 @@ def create_bank_reference(
 ) -> BankReference:
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(payload.project_id, current_user, db)
+    material = db.get(BankMaterial, payload.bank_material_id)
+    if not material or material.project_id != payload.project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankMaterial not found in project")
     ref = BankReference(
         bank_material_id=payload.bank_material_id,
         project_id=payload.project_id,
         scene_id=payload.scene_id,
         stage_key=payload.stage_key,
-        version=payload.version,
+        version=payload.version or material.current_version,
         status="active",
         created_by=current_user.id,
     )
     db.add(ref)
+    material.ref_count += 1
     db.commit()
     db.refresh(ref)
     return ref
@@ -166,5 +176,33 @@ def delete_bank_reference(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankReference not found")
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(ref.project_id, current_user, db)
+    material = db.get(BankMaterial, ref.bank_material_id)
+    if material and material.ref_count > 0:
+        material.ref_count -= 1
     db.delete(ref)
     db.commit()
+
+
+@router.post("/references/{reference_id}/detach", response_model=BankReferenceRead)
+def detach_bank_reference(
+    reference_id: int,
+    payload: BankReferenceDetach,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> BankReference:
+    ref = db.get(BankReference, reference_id)
+    if not ref:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankReference not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
+    require_project_access(ref.project_id, current_user, db)
+    if ref.status == "detached":
+        return ref
+
+    ref.status = "detached"
+    ref.detached_asset_id = payload.detached_asset_id
+    material = db.get(BankMaterial, ref.bank_material_id)
+    if material and material.ref_count > 0:
+        material.ref_count -= 1
+    db.commit()
+    db.refresh(ref)
+    return ref

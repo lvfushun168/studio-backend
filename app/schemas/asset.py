@@ -13,6 +13,9 @@ class AssetAttachmentRead(CamelCaseORMModel):
     storage_path: str
     public_url: str | None
     size_bytes: int | None
+    metadata_json: dict | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class AssetCreate(BaseModel):
@@ -51,6 +54,8 @@ class AssetRead(CamelCaseORMModel):
     metadata_json: dict | None
     uploaded_by: int = Field(serialization_alias="userId")
     attachments: list[AssetAttachmentRead] = []
+    created_at: datetime
+    updated_at: datetime
 
 
 class AssetUpdate(BaseModel):

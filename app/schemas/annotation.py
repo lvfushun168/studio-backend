@@ -13,6 +13,8 @@ class AnnotationAttachmentRead(CamelCaseORMModel):
     storage_path: str
     public_url: str | None
     size_bytes: int | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class AnnotationCreate(BaseModel):
@@ -23,6 +25,17 @@ class AnnotationCreate(BaseModel):
     timestamp_seconds: float | None = None
     canvas_json: dict | None = None
     summary: str | None = None
+    overlay_url: str | None = None
+    merged_url: str | None = None
+
+
+class AnnotationUpdate(BaseModel):
+    frame_number: int | None = None
+    timestamp_seconds: float | None = None
+    canvas_json: dict | None = None
+    summary: str | None = None
+    overlay_url: str | None = None
+    merged_url: str | None = None
 
 
 class AnnotationRead(CamelCaseORMModel):
@@ -41,3 +54,5 @@ class AnnotationRead(CamelCaseORMModel):
     merged_url: str | None
     summary: str | None
     attachments: list[AnnotationAttachmentRead] = []
+    created_at: datetime
+    updated_at: datetime

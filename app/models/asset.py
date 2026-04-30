@@ -1,6 +1,6 @@
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.mixins import TimestampMixin
@@ -31,6 +31,8 @@ class Asset(TimestampMixin, Base):
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
+    attachments = relationship("AssetAttachment", back_populates="asset", cascade="all, delete-orphan")
+
 
 class AssetAttachment(TimestampMixin, Base):
     __tablename__ = "asset_attachments"
@@ -44,3 +46,5 @@ class AssetAttachment(TimestampMixin, Base):
     size_bytes: Mapped[int | None] = mapped_column(nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    asset = relationship("Asset", back_populates="attachments")

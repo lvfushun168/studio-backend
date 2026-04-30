@@ -44,6 +44,10 @@ class BankReferenceCreate(BaseModel):
     version: int | None = None
 
 
+class BankReferenceDetach(BaseModel):
+    detached_asset_id: int | None = None
+
+
 class BankReferenceRead(CamelCaseORMModel):
     id: int
     bank_material_id: int

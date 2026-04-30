@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import CurrentUser, require_project_access
 from app.core.config import settings
 from app.core.database import get_db
+from app.models.annotation import Annotation, AnnotationAttachment
 from app.models.asset import Asset, AssetAttachment
 
 router = APIRouter()
@@ -145,6 +146,37 @@ def upload_asset_attachment(
 
     attachment = AssetAttachment(
         asset_id=asset_id,
+        filename=file.filename or "attachment",
+        media_type=media_type,
+        storage_path=storage_path,
+        public_url=public_url,
+        uploaded_by=current_user.id,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return {"attachment_id": attachment.id, "storage_path": storage_path, "public_url": public_url}
+
+
+@router.post("/annotations/{annotation_id}/attachments", response_model=dict)
+def upload_annotation_attachment(
+    annotation_id: int,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    annotation = db.get(Annotation, annotation_id)
+    if not annotation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annotation not found")
+
+    require_project_access(annotation.project_id, current_user, db)
+
+    subdir = f"projects/{annotation.project_id}/annotation-attachments"
+    storage_path, public_url = _save_uploaded_file(file, subdir)
+    media_type = _detect_media_type(file.filename)
+
+    attachment = AnnotationAttachment(
+        annotation_id=annotation_id,
         filename=file.filename or "attachment",
         media_type=media_type,
         storage_path=storage_path,

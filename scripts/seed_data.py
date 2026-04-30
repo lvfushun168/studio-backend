@@ -13,8 +13,8 @@ if str(ROOT_DIR) not in sys.path:
 from app.core.auth import generate_api_key
 from app.core.database import SessionLocal
 from app.domains.stage_templates import build_default_stage_progress
-from app.models.annotation import Annotation
-from app.models.asset import Asset
+from app.models.annotation import Annotation, AnnotationAttachment
+from app.models.asset import Asset, AssetAttachment
 from app.models.bank import BankMaterial, BankReference
 from app.models.notification import Notification
 from app.models.project import Episode, Project, SceneAssignment, SceneGroup, UserProjectMembership
@@ -124,6 +124,8 @@ def seed() -> None:
             {"project_id": p1.id, "scene_group_id": g2.id, "name": "SC005", "description": "雨夜告白", "level": "A", "stage_template": "ai_single_frame", "pipeline": "ai_single_frame", "frame_count": 1, "sort_order": 2, "created_by": user_map["director1"]},
             {"project_id": p1.id, "scene_group_id": g2.id, "name": "SC004_A", "description": "咖啡店特写补充（基于 SC004 兼用）", "level": "C", "stage_template": "ai_single_frame", "pipeline": "ai_single_frame", "frame_count": 1, "sort_order": 3, "base_scene_id": None, "created_by": user_map["director1"]},
             {"project_id": p2.id, "scene_group_id": g3.id, "name": "SC001", "description": "开场全景", "level": "A", "stage_template": "standard_dual_review", "pipeline": "standard_dual_review", "frame_count": 48, "sort_order": 1, "created_by": user_map["director2"]},
+            {"project_id": p2.id, "scene_group_id": g3.id, "name": "SC002", "description": "机甲起飞镜头", "level": "S", "stage_template": "standard_keyframe_review", "pipeline": "standard_keyframe_review", "frame_count": 36, "sort_order": 2, "created_by": user_map["director2"]},
+            {"project_id": p2.id, "scene_group_id": g3.id, "name": "SC003", "description": "机库调度镜头", "level": "B", "stage_template": "standard_second_review", "pipeline": "standard_second_review", "frame_count": 30, "sort_order": 3, "created_by": user_map["director2"]},
         ]
         scene_objs = []
         for sd in scenes_data:
@@ -147,7 +149,11 @@ def seed() -> None:
         _create_sp(scene_objs[0], {"storyboard": "approved", "ai_draw": "approved", "correction": "in_progress"})
         _create_sp(scene_objs[1], {"storyboard": "approved", "ai_draw": "reviewing"})
         _create_sp(scene_objs[2], {"storyboard": "approved", "layout_character": "in_progress", "layout_background": "pending"})
-        for s in scene_objs[3:]:
+        _create_sp(scene_objs[3], {"storyboard": "approved", "ai_draw": "rejected", "correction": "pending"})
+        _create_sp(scene_objs[4], {"storyboard": "approved", "ai_draw": "approved", "correction": "approved", "final": "reviewing"})
+        _create_sp(scene_objs[5], {"storyboard": "approved", "ai_draw": "pending"})
+        _create_sp(scene_objs[6], {"storyboard": "approved", "layout_character": "approved", "layout_background": "approved", "keyframe": "reviewing"})
+        for s in scene_objs[7:]:
             for item in build_default_stage_progress(s.stage_template, s.project_id, s.id):
                 db.add(StageProgress(**item))
 
@@ -168,8 +174,8 @@ def seed() -> None:
         # 9. Assets
         assets = [
             Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="storyboard", media_type="image", filename="board_sc01.jpg", original_name="board_sc01.jpg", storage_path="", version=1, note="初版分镜", uploaded_by=user_map["artist1"]),
-            Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="ai_draw", media_type="image", filename="ai_result_v1.jpg", original_name="ai_result_v1.jpg", storage_path="", version=1, note="第一轮抽卡", uploaded_by=user_map["artist1"]),
-            Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="ai_draw", media_type="image", filename="ai_result_v2.jpg", original_name="ai_result_v2.jpg", storage_path="", version=2, note="光影修正版", uploaded_by=user_map["artist1"]),
+            Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="ai_draw", media_type="image", filename="ai_result_v1.jpg", original_name="ai_result.jpg", storage_path="", public_url="/media/demo/ai_result_v1.jpg", version=1, note="第一轮抽卡", uploaded_by=user_map["artist1"]),
+            Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="ai_draw", media_type="image", filename="ai_result_v2.jpg", original_name="ai_result.jpg", storage_path="", public_url="/media/demo/ai_result_v2.jpg", version=2, note="光影修正版", uploaded_by=user_map["artist1"]),
             Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="correction", media_type="binary", filename="correct_v1.psd", original_name="correct_v1.psd", storage_path="", version=1, note="修正初稿", uploaded_by=user_map["artist1"]),
             Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="reference", media_type="image", filename="ref_pose.jpg", original_name="ref_pose.jpg", storage_path="", version=1, uploaded_by=user_map["artist1"]),
             Asset(project_id=p1.id, scene_id=scene_objs[1].id, scene_group_id=g1.id, stage_key="storyboard", media_type="image", filename="board_sc02.jpg", original_name="board_sc02.jpg", storage_path="", version=1, uploaded_by=user_map["artist2"]),
@@ -177,15 +183,56 @@ def seed() -> None:
             Asset(project_id=p1.id, scene_id=scene_objs[2].id, scene_group_id=g1.id, stage_key="layout_character", media_type="image", filename="lo_char_v1.psd", original_name="lo_char_v1.psd", storage_path="", version=1, note="LO人物初稿", uploaded_by=user_map["artist2"]),
             Asset(project_id=p1.id, scene_group_id=g1.id, stage_key="reference", media_type="image", is_global=True, filename="char_design_hero.jpg", original_name="char_design_hero.jpg", storage_path="", version=1, note="主角人设图", uploaded_by=user_map["director1"]),
             Asset(project_id=p1.id, scene_group_id=g1.id, stage_key="reference", media_type="image", is_global=True, filename="bg_forest.jpg", original_name="bg_forest.jpg", storage_path="", version=1, note="森林背景设定", uploaded_by=user_map["director1"]),
+            Asset(project_id=p1.id, scene_id=scene_objs[4].id, scene_group_id=g2.id, stage_key="final", media_type="video", filename="scene005_preview.mp4", original_name="scene005_preview.mp4", storage_path="", public_url="/media/demo/scene005_preview.mp4", thumbnail_url="/media/demo/scene005_preview.jpg", version=1, note="导演预览片段", metadata_json={"durationSeconds": 2.4, "width": 1920, "height": 1080}, uploaded_by=user_map["artist3"]),
         ]
         db.add_all(assets)
         db.flush()
 
+        asset_attachments = [
+            AssetAttachment(
+                asset_id=assets[2].id,
+                filename="ai_result_notes.pdf",
+                media_type="binary",
+                storage_path="projects/demo/attachments/ai_result_notes.pdf",
+                public_url="/media/projects/demo/attachments/ai_result_notes.pdf",
+                size_bytes=1024,
+                uploaded_by=user_map["artist1"],
+            )
+        ]
+        db.add_all(asset_attachments)
+
         # 10. Annotations
         annotations = [
             Annotation(project_id=p1.id, target_asset_id=assets[0].id, target_version=1, author_id=user_map["director1"], author_role="director", canvas_json={"objects": []}, summary="构图OK"),
+            Annotation(
+                project_id=p1.id,
+                target_asset_id=assets[9].id,
+                target_version=1,
+                author_id=user_map["director1"],
+                author_role="director",
+                frame_number=142,
+                timestamp_seconds=1.184,
+                canvas_json={"objects": [{"type": "circle"}]},
+                overlay_url="/media/demo/annotations/frame142-overlay.png",
+                merged_url="/media/demo/annotations/frame142-merged.png",
+                summary="第142帧角色手臂透视需要修正",
+            ),
         ]
         db.add_all(annotations)
+        db.flush()
+
+        annotation_attachments = [
+            AnnotationAttachment(
+                annotation_id=annotations[1].id,
+                filename="director-note.png",
+                media_type="image",
+                storage_path="projects/demo/annotation-attachments/director-note.png",
+                public_url="/media/projects/demo/annotation-attachments/director-note.png",
+                size_bytes=2048,
+                uploaded_by=user_map["director1"],
+            )
+        ]
+        db.add_all(annotation_attachments)
 
         # 11. BankMaterial
         bm = BankMaterial(

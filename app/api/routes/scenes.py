@@ -120,6 +120,7 @@ def batch_update_scene_sort(
     db: Session = Depends(get_db),
 ) -> None:
     """Batch update sort_order for multiple scenes."""
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     for item in payload.items:
         scene = db.get(Scene, item.scene_id)
         if scene:
@@ -156,6 +157,7 @@ def update_scene(
     scene = db.get(Scene, scene_id)
     if not scene:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
     if payload.scene_group_id is not None:
         scene.scene_group_id = payload.scene_group_id
@@ -193,6 +195,7 @@ def delete_scene(
     scene = db.get(Scene, scene_id)
     if not scene:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
     db.delete(scene)
     db.commit()
@@ -225,6 +228,7 @@ def create_scene_assignment(
     scene = db.get(Scene, scene_id)
     if not scene:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
     assignment = SceneAssignment(scene_id=scene_id, user_id=user_id, stage_key=stage_key)
     db.add(assignment)
@@ -242,6 +246,7 @@ def delete_scene_assignment(
 ) -> None:
     scene = db.get(Scene, scene_id)
     if scene:
+        require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
         require_project_access(scene.project_id, current_user, db)
     assignment = db.get(SceneAssignment, assignment_id)
     if not assignment or assignment.scene_id != scene_id:
@@ -263,6 +268,7 @@ def accept_stage(
     scene = db.get(Scene, scene_id)
     if not scene:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_role(ARTIST_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
 
     stmt = select(StageProgress).where(
@@ -297,6 +303,7 @@ def rollback_stage(
     scene = db.get(Scene, scene_id)
     if not scene:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_role(DIRECTOR_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
 
     stmt = select(StageProgress).where(

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import CurrentUser, require_project_access
+from app.core.auth import CurrentUser, get_accessible_project_ids, require_project_access
 from app.core.database import get_db
 from app.models.reference import Reference
 from app.schemas.reference import ReferenceCreate, ReferenceRead
@@ -22,7 +22,13 @@ def list_references(
 ) -> list[Reference]:
     stmt = select(Reference).order_by(Reference.id.desc())
     if project_id is not None:
+        require_project_access(project_id, current_user, db)
         stmt = stmt.where(Reference.project_id == project_id)
+    elif current_user.role != "admin":
+        accessible_project_ids = get_accessible_project_ids(current_user, db)
+        if not accessible_project_ids:
+            return []
+        stmt = stmt.where(Reference.project_id.in_(accessible_project_ids))
     if source_type is not None:
         stmt = stmt.where(Reference.source_type == source_type)
     if source_id is not None:

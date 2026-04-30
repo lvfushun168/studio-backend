@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import CurrentUser, generate_api_key, require_project_access
+from app.core.auth import ADMIN_ROLES, CurrentUser, generate_api_key, require_project_access, require_role
 from app.core.database import get_db
 from app.models.project import UserProjectMembership
 from app.models.user import User
@@ -23,6 +23,9 @@ def list_users(
     current_user: CurrentUser = None,
     db: Session = Depends(get_db),
 ) -> list[User]:
+    if project_id is None:
+        require_role(ADMIN_ROLES)(current_user)
+
     stmt = select(User).order_by(User.id)
     if project_id is not None:
         if current_user and current_user.role != "admin":
@@ -39,7 +42,12 @@ def list_users(
 
 
 @router.get("/{user_id}", response_model=UserRead)
-def get_user(user_id: int, db: Session = Depends(get_db)) -> User:
+def get_user(
+    user_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> User:
+    require_role(ADMIN_ROLES)(current_user)
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -47,7 +55,12 @@ def get_user(user_id: int, db: Session = Depends(get_db)) -> User:
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> User:
+def create_user(
+    payload: UserCreate,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> User:
+    require_role(ADMIN_ROLES)(current_user)
     user = User(
         username=payload.username,
         display_name=payload.display_name,
@@ -63,7 +76,13 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> User:
 
 
 @router.put("/{user_id}", response_model=UserRead)
-def update_user(user_id: int, payload: UserCreate, db: Session = Depends(get_db)) -> User:
+def update_user(
+    user_id: int,
+    payload: UserCreate,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> User:
+    require_role(ADMIN_ROLES)(current_user)
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")

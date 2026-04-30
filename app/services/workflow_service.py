@@ -138,10 +138,17 @@ def submit_stage(
     # Notify directors/producers
     from sqlalchemy import select as _select
     from app.models.project import UserProjectMembership
+    from app.models.user import User
     stmt_dir = _select(UserProjectMembership).where(
         UserProjectMembership.project_id == scene.project_id,
     )
     for m in db.scalars(stmt_dir).all():
+        effective_role = m.role_in_project
+        if not effective_role:
+            user = db.get(User, m.user_id)
+            effective_role = user.role if user else None
+        if effective_role not in ("admin", "director", "producer"):
+            continue
         _create_notification(
             db,
             scene.project_id,
@@ -369,13 +376,20 @@ def resubmit_stage(
     )
     db.add(record)
 
-    # Notify directors about resubmission
+    # Notify directors/producers about resubmission
     from sqlalchemy import select as _select2
     from app.models.project import UserProjectMembership
+    from app.models.user import User
     stmt_dir = _select2(UserProjectMembership).where(
         UserProjectMembership.project_id == scene.project_id,
     )
     for m in db.scalars(stmt_dir).all():
+        effective_role = m.role_in_project
+        if not effective_role:
+            user = db.get(User, m.user_id)
+            effective_role = user.role if user else None
+        if effective_role not in ("admin", "director", "producer"):
+            continue
         _create_notification(
             db,
             scene.project_id,

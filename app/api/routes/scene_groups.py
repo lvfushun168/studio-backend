@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import CurrentUser, require_project_access
+from app.core.auth import CurrentUser, DIRECTOR_PRODUCER_ROLES, get_accessible_project_ids, require_project_access, require_role
 from app.core.database import get_db
 from app.models.project import SceneGroup
 from app.schemas.scene_group import SceneGroupCreate, SceneGroupRead
@@ -19,9 +19,15 @@ def list_scene_groups(
 ) -> list[SceneGroup]:
     stmt = select(SceneGroup).order_by(SceneGroup.sort_order, SceneGroup.id)
     if project_id is not None:
+        require_project_access(project_id, current_user, db)
         stmt = stmt.where(SceneGroup.project_id == project_id)
     if episode_id is not None:
         stmt = stmt.where(SceneGroup.episode_id == episode_id)
+    if project_id is None and current_user.role != "admin":
+        accessible_project_ids = get_accessible_project_ids(current_user, db)
+        if not accessible_project_ids:
+            return []
+        stmt = stmt.where(SceneGroup.project_id.in_(accessible_project_ids))
     return list(db.scalars(stmt).all())
 
 
@@ -31,6 +37,7 @@ def create_scene_group(
     current_user: CurrentUser,
     db: Session = Depends(get_db),
 ) -> SceneGroup:
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(payload.project_id, current_user, db)
     group = SceneGroup(
         project_id=payload.project_id,
@@ -53,6 +60,7 @@ def get_scene_group(
     group = db.get(SceneGroup, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SceneGroup not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(group.project_id, current_user, db)
     return group
 
@@ -84,6 +92,7 @@ def delete_scene_group(
     group = db.get(SceneGroup, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SceneGroup not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(group.project_id, current_user, db)
     db.delete(group)
     db.commit()

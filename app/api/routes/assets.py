@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.auth import CurrentUser, require_project_access
+from app.core.auth import CurrentUser, get_accessible_project_ids, require_project_access
 from app.core.database import get_db
 from app.models.asset import Asset, AssetAttachment
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
@@ -23,7 +23,13 @@ def list_assets(
 ) -> list[Asset]:
     stmt = select(Asset).order_by(Asset.id.desc())
     if project_id is not None:
+        require_project_access(project_id, current_user, db)
         stmt = stmt.where(Asset.project_id == project_id)
+    elif current_user.role != "admin":
+        accessible_project_ids = get_accessible_project_ids(current_user, db)
+        if not accessible_project_ids:
+            return []
+        stmt = stmt.where(Asset.project_id.in_(accessible_project_ids))
     if scene_id is not None:
         stmt = stmt.where(Asset.scene_id == scene_id)
     if scene_group_id is not None:

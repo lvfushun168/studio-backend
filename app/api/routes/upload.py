@@ -47,8 +47,7 @@ def upload_asset_file(
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
-    if current_user:
-        require_project_access(asset.project_id, current_user, db)
+    require_project_access(asset.project_id, current_user, db)
 
     original_name = file.filename or asset.original_name
     ext = Path(original_name).suffix.lstrip(".").lower()
@@ -84,7 +83,7 @@ def upload_asset_file(
         asset.extension = ext if ext else None
         asset.media_type = _detect_media_type(original_name)
         asset.version = max(1, max_version)
-        asset.uploaded_by = current_user.id if current_user else 1
+        asset.uploaded_by = current_user.id
         db.commit()
         db.refresh(asset)
         return {
@@ -113,7 +112,7 @@ def upload_asset_file(
         version=max_version + 1,
         note=asset.note,
         metadata_json=asset.metadata_json,
-        uploaded_by=current_user.id if current_user else 1,
+        uploaded_by=current_user.id,
     )
     db.add(new_asset)
     db.commit()
@@ -137,8 +136,7 @@ def upload_asset_attachment(
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
-    if current_user:
-        require_project_access(asset.project_id, current_user, db)
+    require_project_access(asset.project_id, current_user, db)
 
     subdir = f"projects/{asset.project_id}/attachments"
     storage_path, public_url = _save_uploaded_file(file, subdir)
@@ -151,7 +149,7 @@ def upload_asset_attachment(
         media_type=media_type,
         storage_path=storage_path,
         public_url=public_url,
-        uploaded_by=current_user.id if current_user else 1,
+        uploaded_by=current_user.id,
     )
     db.add(attachment)
     db.commit()

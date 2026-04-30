@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     media_root: str = "./storage"
     cookie_encryption_key: str = ""
     default_model: str | None = None
+    dev_default_user_id: int | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

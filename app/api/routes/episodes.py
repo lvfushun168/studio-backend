@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import CurrentUser, require_project_access
+from app.core.auth import CurrentUser, DIRECTOR_PRODUCER_ROLES, get_accessible_project_ids, require_project_access, require_role
 from app.core.database import get_db
 from app.models.project import Episode
 from app.schemas.episode import EpisodeCreate, EpisodeRead
@@ -18,7 +18,13 @@ def list_episodes(
 ) -> list[Episode]:
     stmt = select(Episode).order_by(Episode.episode_number)
     if project_id is not None:
+        require_project_access(project_id, current_user, db)
         stmt = stmt.where(Episode.project_id == project_id)
+    elif current_user.role != "admin":
+        accessible_project_ids = get_accessible_project_ids(current_user, db)
+        if not accessible_project_ids:
+            return []
+        stmt = stmt.where(Episode.project_id.in_(accessible_project_ids))
     return list(db.scalars(stmt).all())
 
 
@@ -28,6 +34,7 @@ def create_episode(
     current_user: CurrentUser,
     db: Session = Depends(get_db),
 ) -> Episode:
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(payload.project_id, current_user, db)
     episode = Episode(
         project_id=payload.project_id,
@@ -49,6 +56,7 @@ def get_episode(
     episode = db.get(Episode, episode_id)
     if not episode:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(episode.project_id, current_user, db)
     return episode
 
@@ -80,6 +88,7 @@ def delete_episode(
     episode = db.get(Episode, episode_id)
     if not episode:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Episode not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(episode.project_id, current_user, db)
     db.delete(episode)
     db.commit()

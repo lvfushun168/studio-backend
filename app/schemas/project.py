@@ -10,6 +10,7 @@ class ProjectCreate(BaseModel):
     description: str | None = None
     project_type: str = "series"
     status: str = "active"
+    deadline_at: datetime | None = None
 
 
 class ProjectUpdate(BaseModel):

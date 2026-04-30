@@ -51,6 +51,14 @@ def create_project(
         created_by=current_user.id,
     )
     db.add(project)
+    db.flush()
+    db.add(
+        UserProjectMembership(
+            user_id=current_user.id,
+            project_id=project.id,
+            role_in_project=current_user.role,
+        )
+    )
     db.commit()
     db.refresh(project)
     return project
@@ -78,6 +86,7 @@ def update_project(
     db: Session = Depends(get_db),
 ) -> Project:
     require_project_access(project_id, current_user, db)
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -103,6 +112,7 @@ def delete_project(
     db: Session = Depends(get_db),
 ) -> None:
     require_project_access(project_id, current_user, db)
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")

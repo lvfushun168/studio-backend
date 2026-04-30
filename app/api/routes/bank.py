@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import CurrentUser, require_project_access
+from app.core.auth import (
+    CurrentUser,
+    DIRECTOR_PRODUCER_ROLES,
+    get_accessible_project_ids,
+    require_project_access,
+    require_role,
+)
 from app.core.database import get_db
 from app.models.bank import BankMaterial, BankReference
 from app.schemas.bank import BankMaterialCreate, BankMaterialRead, BankReferenceCreate, BankReferenceRead
@@ -22,7 +28,13 @@ def list_bank_materials(
 ) -> list[BankMaterial]:
     stmt = select(BankMaterial).order_by(BankMaterial.id.desc())
     if project_id is not None:
+        require_project_access(project_id, current_user, db)
         stmt = stmt.where(BankMaterial.project_id == project_id)
+    elif current_user.role != "admin":
+        accessible_project_ids = get_accessible_project_ids(current_user, db)
+        if not accessible_project_ids:
+            return []
+        stmt = stmt.where(BankMaterial.project_id.in_(accessible_project_ids))
     if character_name is not None:
         stmt = stmt.where(BankMaterial.character_name == character_name)
     if part_name is not None:
@@ -36,6 +48,7 @@ def create_bank_material(
     current_user: CurrentUser,
     db: Session = Depends(get_db),
 ) -> BankMaterial:
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(payload.project_id, current_user, db)
     material = BankMaterial(
         project_id=payload.project_id,
@@ -78,6 +91,7 @@ def delete_bank_material(
     material = db.get(BankMaterial, material_id)
     if not material:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankMaterial not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(material.project_id, current_user, db)
     db.delete(material)
     db.commit()
@@ -93,6 +107,11 @@ def list_bank_references(
     db: Session = Depends(get_db),
 ) -> list[BankReference]:
     stmt = select(BankReference).order_by(BankReference.id.desc())
+    if current_user.role != "admin":
+        accessible_project_ids = get_accessible_project_ids(current_user, db)
+        if not accessible_project_ids:
+            return []
+        stmt = stmt.where(BankReference.project_id.in_(accessible_project_ids))
     if scene_id is not None:
         stmt = stmt.where(BankReference.scene_id == scene_id)
     if bank_material_id is not None:
@@ -106,6 +125,7 @@ def create_bank_reference(
     current_user: CurrentUser,
     db: Session = Depends(get_db),
 ) -> BankReference:
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(payload.project_id, current_user, db)
     ref = BankReference(
         bank_material_id=payload.bank_material_id,
@@ -144,6 +164,7 @@ def delete_bank_reference(
     ref = db.get(BankReference, reference_id)
     if not ref:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankReference not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(ref.project_id, current_user, db)
     db.delete(ref)
     db.commit()

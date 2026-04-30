@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """Seed minimal demo data for frontend integration testing."""
 
+from pathlib import Path
+import sys
+
 from sqlalchemy import text
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from app.core.auth import generate_api_key
-from app.core.database import Base
-from app.core.database import SessionLocal, engine
+from app.core.database import SessionLocal
 from app.domains.stage_templates import build_default_stage_progress
 from app.models.annotation import Annotation
 from app.models.asset import Asset

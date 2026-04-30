@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import CurrentUser, DIRECTOR_ROLES, require_project_access, require_role
+from app.core.auth import ARTIST_ROLES, CurrentUser, DIRECTOR_ROLES, require_project_access, require_role
 from app.core.database import get_db
 from app.models.scene import Scene, StageProgress
 from app.models.workflow import ReviewRecord
@@ -28,6 +28,7 @@ def submit_scene(
     scene = db.get(Scene, scene_id)
     if not scene:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_role(ARTIST_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
 
     record = workflow_service.submit_stage(db, scene, payload.stage_key, current_user.id)
@@ -82,6 +83,7 @@ def resubmit_scene(
     scene = db.get(Scene, scene_id)
     if not scene:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_role(ARTIST_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
 
     record = workflow_service.resubmit_stage(db, scene, payload.stage_key, current_user.id)

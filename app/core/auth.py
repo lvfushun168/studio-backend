@@ -8,6 +8,7 @@ from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.project import UserProjectMembership
 from app.models.user import User
@@ -41,7 +42,7 @@ async def get_current_user(
                 detail="Invalid X-User-ID header",
             )
         user = db.get(User, user_id)
-        if not user:
+        if not user or not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
@@ -60,11 +61,11 @@ async def get_current_user(
             detail="Invalid API key",
         )
 
-    # Fallback: return first admin for backward compatibility during transition
-    stmt = select(User).where(User.role == "admin", User.is_active == True).order_by(User.id)
-    user = db.scalar(stmt)
-    if user:
-        return user
+    # Explicit development fallback only when configured.
+    if settings.app_env == "development" and settings.dev_default_user_id is not None:
+        user = db.get(User, settings.dev_default_user_id)
+        if user and user.is_active:
+            return user
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -152,3 +153,14 @@ def is_project_member(project_id: int, user: User, db: Session) -> bool:
         UserProjectMembership.project_id == project_id,
     )
     return db.scalar(stmt) is not None
+
+
+def get_accessible_project_ids(user: User, db: Session) -> list[int]:
+    """Return the project IDs the user can access."""
+    if user.role == "admin":
+        return []
+
+    stmt = select(UserProjectMembership.project_id).where(
+        UserProjectMembership.user_id == user.id,
+    )
+    return list(db.scalars(stmt).all())

@@ -18,6 +18,11 @@ from app.schemas.bank import (
     BankReferenceDetach,
     BankReferenceRead,
 )
+from app.services.bank_service import (
+    create_bank_material_from_asset,
+    create_bank_reference_with_asset,
+    detach_bank_reference_with_asset,
+)
 
 router = APIRouter()
 
@@ -56,19 +61,23 @@ def create_bank_material(
 ) -> BankMaterial:
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(payload.project_id, current_user, db)
-    material = BankMaterial(
-        project_id=payload.project_id,
-        source_asset_id=payload.source_asset_id,
-        source_scene_id=payload.source_scene_id,
-        source_stage_key=payload.source_stage_key,
-        name=payload.name,
-        character_name=payload.character_name,
-        part_name=payload.part_name,
-        pose=payload.pose,
-        angle=payload.angle,
-        current_version=1,
-        created_by=current_user.id,
-    )
+    source_asset_id = payload.source_asset_id
+    if source_asset_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="source_asset_id is required")
+    try:
+        material = create_bank_material_from_asset(
+            db,
+            project_id=payload.project_id,
+            source_asset_id=source_asset_id,
+            created_by=current_user.id,
+            name=payload.name,
+            character_name=payload.character_name,
+            part_name=payload.part_name,
+            pose=payload.pose,
+            angle=payload.angle,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     db.add(material)
     db.commit()
     db.refresh(material)
@@ -99,6 +108,9 @@ def delete_bank_material(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankMaterial not found")
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(material.project_id, current_user, db)
+    ref_stmt = select(BankReference).where(BankReference.bank_material_id == material_id)
+    if db.scalar(ref_stmt):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete bank material with reference history")
     db.delete(material)
     db.commit()
 
@@ -136,17 +148,18 @@ def create_bank_reference(
     material = db.get(BankMaterial, payload.bank_material_id)
     if not material or material.project_id != payload.project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankMaterial not found in project")
-    ref = BankReference(
-        bank_material_id=payload.bank_material_id,
-        project_id=payload.project_id,
-        scene_id=payload.scene_id,
-        stage_key=payload.stage_key,
-        version=payload.version or material.current_version,
-        status="active",
-        created_by=current_user.id,
-    )
-    db.add(ref)
-    material.ref_count += 1
+    try:
+        ref, _derived_asset = create_bank_reference_with_asset(
+            db,
+            material=material,
+            project_id=payload.project_id,
+            scene_id=payload.scene_id,
+            stage_key=payload.stage_key,
+            version=payload.version,
+            created_by=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     db.commit()
     db.refresh(ref)
     return ref
@@ -177,7 +190,7 @@ def delete_bank_reference(
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(ref.project_id, current_user, db)
     material = db.get(BankMaterial, ref.bank_material_id)
-    if material and material.ref_count > 0:
+    if material and material.ref_count > 0 and ref.status == "active":
         material.ref_count -= 1
     db.delete(ref)
     db.commit()
@@ -195,14 +208,15 @@ def detach_bank_reference(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankReference not found")
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(ref.project_id, current_user, db)
-    if ref.status == "detached":
-        return ref
-
-    ref.status = "detached"
-    ref.detached_asset_id = payload.detached_asset_id
-    material = db.get(BankMaterial, ref.bank_material_id)
-    if material and material.ref_count > 0:
-        material.ref_count -= 1
+    try:
+        ref, _detached_asset = detach_bank_reference_with_asset(
+            db,
+            reference=ref,
+            detached_asset_id=payload.detached_asset_id,
+            detached_by=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     db.commit()
     db.refresh(ref)
     return ref

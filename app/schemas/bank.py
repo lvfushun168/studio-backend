@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from app.schemas.common import CamelCaseORMModel
 
@@ -34,6 +34,33 @@ class BankMaterialRead(CamelCaseORMModel):
     status: str
     metadata_json: dict | None
     created_by: int
+    created_at: datetime
+    updated_at: datetime
+
+    @computed_field
+    @property
+    def character(self) -> str | None:
+        return self.character_name
+
+    @computed_field
+    @property
+    def part(self) -> str | None:
+        return self.part_name
+
+    @computed_field
+    @property
+    def source_stage(self) -> str | None:
+        return self.source_stage_key
+
+    @computed_field
+    @property
+    def url(self) -> str | None:
+        return (self.metadata_json or {}).get("publicUrl")
+
+    @computed_field
+    @property
+    def thumbnail_url(self) -> str | None:
+        return (self.metadata_json or {}).get("thumbnailUrl")
 
 
 class BankReferenceCreate(BaseModel):
@@ -58,3 +85,10 @@ class BankReferenceRead(CamelCaseORMModel):
     status: str
     detached_asset_id: int | None
     created_by: int | None
+    created_at: datetime
+    updated_at: datetime
+
+    @computed_field
+    @property
+    def stage(self) -> str:
+        return self.stage_key

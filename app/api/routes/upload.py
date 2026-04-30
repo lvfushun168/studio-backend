@@ -10,12 +10,13 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.annotation import Annotation, AnnotationAttachment
 from app.models.asset import Asset, AssetAttachment
+from app.services.media_service import extract_image_metadata, extract_video_metadata, generate_video_thumbnail
 
 router = APIRouter()
 
 
-def _save_uploaded_file(upload_file: UploadFile, subdir: str) -> tuple[str, str]:
-    """保存上传文件到存储目录，返回 (storage_path, public_url)。"""
+def _save_uploaded_file(upload_file: UploadFile, subdir: str) -> tuple[str, str, int]:
+    """保存上传文件到存储目录，返回 (storage_path, public_url, size_bytes)。"""
     ext = Path(upload_file.filename or "file.bin").suffix
     safe_name = f"{uuid.uuid4().hex}{ext}"
     dest_dir = settings.media_root_path / subdir
@@ -25,7 +26,7 @@ def _save_uploaded_file(upload_file: UploadFile, subdir: str) -> tuple[str, str]
     dest_path.write_bytes(content)
     storage_path = str(dest_path.relative_to(settings.media_root_path))
     public_url = f"/media/{storage_path}"
-    return storage_path, public_url
+    return storage_path, public_url, len(content)
 
 
 def _detect_media_type(filename: str | None) -> str:
@@ -73,7 +74,7 @@ def upload_asset_file(
     ) or 0
 
     subdir = f"projects/{asset.project_id}/assets"
-    storage_path, public_url = _save_uploaded_file(file, subdir)
+    storage_path, public_url, size_bytes = _save_uploaded_file(file, subdir)
 
     # If this is the first upload or original_name changed, update existing asset
     if not asset.storage_path or asset.original_name != original_name:
@@ -85,6 +86,17 @@ def upload_asset_file(
         asset.media_type = _detect_media_type(original_name)
         asset.version = max(1, max_version)
         asset.uploaded_by = current_user.id
+        merged_meta = dict(asset.metadata_json or {})
+        merged_meta["sizeBytes"] = size_bytes
+        merged_meta["contentType"] = file.content_type
+        asset.metadata_json = merged_meta
+        if asset.media_type == "video":
+            asset.metadata_json = extract_video_metadata(asset)
+            thumbnail = generate_video_thumbnail(asset)
+            asset.thumbnail_path = thumbnail["thumbnail_path"]
+            asset.thumbnail_url = thumbnail["thumbnail_url"]
+        elif asset.media_type == "image":
+            asset.metadata_json = extract_image_metadata(asset)
         db.commit()
         db.refresh(asset)
         return {
@@ -92,6 +104,8 @@ def upload_asset_file(
             "version": asset.version,
             "storage_path": storage_path,
             "public_url": public_url,
+            "thumbnail_url": asset.thumbnail_url,
+            "metadata_json": asset.metadata_json,
         }
 
     # Same name upload: create new version
@@ -112,10 +126,22 @@ def upload_asset_file(
         public_url=public_url,
         version=max_version + 1,
         note=asset.note,
-        metadata_json=asset.metadata_json,
+        metadata_json={
+            **(asset.metadata_json or {}),
+            "sizeBytes": size_bytes,
+            "contentType": file.content_type,
+        },
         uploaded_by=current_user.id,
     )
     db.add(new_asset)
+    db.flush()
+    if new_asset.media_type == "video":
+        new_asset.metadata_json = extract_video_metadata(new_asset)
+        thumbnail = generate_video_thumbnail(new_asset)
+        new_asset.thumbnail_path = thumbnail["thumbnail_path"]
+        new_asset.thumbnail_url = thumbnail["thumbnail_url"]
+    elif new_asset.media_type == "image":
+        new_asset.metadata_json = extract_image_metadata(new_asset)
     db.commit()
     db.refresh(new_asset)
     return {
@@ -123,6 +149,8 @@ def upload_asset_file(
         "version": new_asset.version,
         "storage_path": storage_path,
         "public_url": public_url,
+        "thumbnail_url": new_asset.thumbnail_url,
+        "metadata_json": new_asset.metadata_json,
     }
 
 
@@ -140,7 +168,7 @@ def upload_asset_attachment(
     require_project_access(asset.project_id, current_user, db)
 
     subdir = f"projects/{asset.project_id}/attachments"
-    storage_path, public_url = _save_uploaded_file(file, subdir)
+    storage_path, public_url, size_bytes = _save_uploaded_file(file, subdir)
 
     media_type = _detect_media_type(file.filename)
 
@@ -150,6 +178,7 @@ def upload_asset_attachment(
         media_type=media_type,
         storage_path=storage_path,
         public_url=public_url,
+        size_bytes=size_bytes,
         uploaded_by=current_user.id,
     )
     db.add(attachment)
@@ -172,7 +201,7 @@ def upload_annotation_attachment(
     require_project_access(annotation.project_id, current_user, db)
 
     subdir = f"projects/{annotation.project_id}/annotation-attachments"
-    storage_path, public_url = _save_uploaded_file(file, subdir)
+    storage_path, public_url, size_bytes = _save_uploaded_file(file, subdir)
     media_type = _detect_media_type(file.filename)
 
     attachment = AnnotationAttachment(
@@ -181,6 +210,7 @@ def upload_annotation_attachment(
         media_type=media_type,
         storage_path=storage_path,
         public_url=public_url,
+        size_bytes=size_bytes,
         uploaded_by=current_user.id,
     )
     db.add(attachment)

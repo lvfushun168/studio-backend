@@ -1,7 +1,10 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.async_job import AsyncJob
+from app.services.job_service import handle_job
 
 
 class WorkerRunner:
@@ -18,8 +21,26 @@ class WorkerRunner:
         if not job:
             return False
 
-        job.status = "success"
-        job.result_json = {"message": "No handler registered yet."}
-        self.db.add(job)
-        self.db.commit()
+        try:
+            job.status = "running"
+            job.started_at = datetime.now(timezone.utc)
+            self.db.flush()
+            result = handle_job(self.db, job)
+            job.status = "success"
+            job.result_json = result
+            job.finished_at = datetime.now(timezone.utc)
+            self.db.add(job)
+            self.db.commit()
+        except Exception as exc:
+            self.db.rollback()
+            job = self.db.get(AsyncJob, job.id)
+            job.error_message = str(exc)
+            job.finished_at = datetime.now(timezone.utc)
+            if job.retry_count < job.max_retries:
+                job.retry_count += 1
+                job.status = "pending"
+            else:
+                job.status = "failed"
+            self.db.add(job)
+            self.db.commit()
         return True

@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.models.annotation import Annotation, AnnotationAttachment
 from app.models.asset import Asset
 from app.schemas.annotation import AnnotationCreate, AnnotationRead, AnnotationUpdate
+from app.services.media_service import generate_annotation_artifacts
 
 router = APIRouter()
 
@@ -70,6 +71,12 @@ def create_annotation(
         summary=payload.summary,
     )
     db.add(annotation)
+    db.flush()
+    generated = generate_annotation_artifacts(annotation, asset)
+    annotation.overlay_path = generated["overlay_path"]
+    annotation.overlay_url = payload.overlay_url or generated["overlay_url"]
+    annotation.merged_path = generated["merged_path"]
+    annotation.merged_url = payload.merged_url or generated["merged_url"]
     db.commit()
     stmt = select(Annotation).options(selectinload(Annotation.attachments)).where(Annotation.id == annotation.id)
     return db.scalar(stmt)
@@ -104,10 +111,25 @@ def update_annotation(
     if annotation.author_id != current_user.id and current_user.role not in ("admin", "director"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit others' annotations")
 
-    for field in ("frame_number", "timestamp_seconds", "canvas_json", "summary", "overlay_url", "merged_url"):
+    regenerate = False
+    for field in ("frame_number", "timestamp_seconds", "canvas_json", "summary"):
         value = getattr(payload, field)
         if value is not None:
             setattr(annotation, field, value)
+            regenerate = True
+    if payload.overlay_url is not None:
+        annotation.overlay_url = payload.overlay_url
+    if payload.merged_url is not None:
+        annotation.merged_url = payload.merged_url
+    if regenerate:
+        asset = db.get(Asset, annotation.target_asset_id)
+        generated = generate_annotation_artifacts(annotation, asset)
+        annotation.overlay_path = generated["overlay_path"]
+        if payload.overlay_url is None:
+            annotation.overlay_url = generated["overlay_url"]
+        annotation.merged_path = generated["merged_path"]
+        if payload.merged_url is None:
+            annotation.merged_url = generated["merged_url"]
 
     db.commit()
     stmt = select(Annotation).options(selectinload(Annotation.attachments)).where(Annotation.id == annotation_id)

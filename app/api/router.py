@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     annotations,
+    async_jobs,
     assets,
     bank,
     episodes,
@@ -30,6 +31,7 @@ api_router.include_router(workflow.router, prefix="/workflow", tags=["workflow"]
 api_router.include_router(assets.router, prefix="/assets", tags=["assets"])
 api_router.include_router(upload.router, prefix="/upload", tags=["upload"])
 api_router.include_router(annotations.router, prefix="/annotations", tags=["annotations"])
+api_router.include_router(async_jobs.router, prefix="/async-jobs", tags=["async-jobs"])
 api_router.include_router(bank.router, prefix="/bank", tags=["bank"])
 api_router.include_router(references.router, prefix="/references", tags=["references"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

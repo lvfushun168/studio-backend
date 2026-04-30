@@ -20,6 +20,14 @@ class StageProgressRead(TimestampedRead):
     rejected_at: datetime | None
 
 
+class SceneAssignmentRead(BaseModel):
+    id: int
+    scene_id: int
+    user_id: int
+    stage_key: str | None
+    assigned_at: datetime
+
+
 class SceneCreate(BaseModel):
     project_id: int
     scene_group_id: int
@@ -31,7 +39,19 @@ class SceneCreate(BaseModel):
     frame_count: int = 1
     duration_seconds: float | None = None
     sort_order: int = 0
+    base_scene_id: int | None = None
     created_by: int | None = None
+
+
+class SceneUpdate(BaseModel):
+    scene_group_id: int | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = None
+    level: str | None = None
+    frame_count: int | None = None
+    duration_seconds: float | None = None
+    sort_order: int | None = None
+    base_scene_id: int | None = None
 
 
 class SceneRead(TimestampedRead):
@@ -49,3 +69,4 @@ class SceneRead(TimestampedRead):
     sort_order: int
     created_by: int | None
     stage_progresses: list[StageProgressRead] = []
+    assignments: list[SceneAssignmentRead] = []

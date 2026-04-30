@@ -12,6 +12,19 @@ class ProjectCreate(BaseModel):
     status: str = "active"
 
 
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    project_type: str | None = None
+    status: str | None = None
+    deadline_at: datetime | None = None
+
+
+class ProjectMemberRead(BaseModel):
+    user_id: int
+    role_in_project: str | None
+
+
 class ProjectRead(TimestampedRead):
     id: int
     name: str

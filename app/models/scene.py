@@ -29,6 +29,7 @@ class Scene(TimestampMixin, Base):
 
     scene_group = relationship("SceneGroup", back_populates="scenes")
     stage_progresses = relationship("StageProgress", back_populates="scene", cascade="all, delete-orphan")
+    assignments = relationship("SceneAssignment", back_populates="scene", cascade="all, delete-orphan")
 
 
 class StageProgress(TimestampMixin, Base):

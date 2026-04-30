@@ -1,0 +1,70 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.user import User
+from app.schemas.user import UserCreate, UserRead
+
+router = APIRouter()
+
+
+@router.get("/me", response_model=UserRead)
+def get_current_user(db: Session = Depends(get_db)) -> User:
+    stmt = select(User).where(User.role == "admin").order_by(User.id)
+    user = db.scalar(stmt)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No user found")
+    return user
+
+
+@router.get("", response_model=list[UserRead])
+def list_users(project_id: int | None = None, db: Session = Depends(get_db)) -> list[User]:
+    stmt = select(User).order_by(User.id)
+    if project_id is not None:
+        from app.models.project import UserProjectMembership
+        stmt = (
+            select(User)
+            .join(UserProjectMembership, UserProjectMembership.user_id == User.id)
+            .where(UserProjectMembership.project_id == project_id)
+            .order_by(User.id)
+        )
+    return list(db.scalars(stmt).all())
+
+
+@router.get("/{user_id}", response_model=UserRead)
+def get_user(user_id: int, db: Session = Depends(get_db)) -> User:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+@router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> User:
+    user = User(
+        username=payload.username,
+        display_name=payload.display_name,
+        email=payload.email,
+        role=payload.role,
+        is_active=payload.is_active,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.put("/{user_id}", response_model=UserRead)
+def update_user(user_id: int, payload: UserCreate, db: Session = Depends(get_db)) -> User:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.username = payload.username
+    user.display_name = payload.display_name
+    user.email = payload.email
+    user.role = payload.role
+    user.is_active = payload.is_active
+    db.commit()
+    db.refresh(user)
+    return user

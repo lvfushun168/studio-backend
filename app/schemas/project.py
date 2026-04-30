@@ -1,29 +1,36 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import Field, computed_field
 
-from app.schemas.common import CamelCaseORMModel
+from app.schemas.common import CamelCaseModel, CamelCaseORMModel
 
 
-class ProjectCreate(BaseModel):
+class ProjectCreate(CamelCaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
     project_type: str = "series"
     status: str = "active"
     deadline_at: datetime | None = None
+    member_ids: list[int] = []
 
 
-class ProjectUpdate(BaseModel):
+class ProjectUpdate(CamelCaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     project_type: str | None = None
     status: str | None = None
     deadline_at: datetime | None = None
+    member_ids: list[int] | None = None
 
 
 class ProjectMemberRead(CamelCaseORMModel):
     user_id: int
     role_in_project: str | None
+
+
+class ProjectMemberWrite(CamelCaseModel):
+    user_id: int
+    role_in_project: str | None = None
 
 
 class ProjectRead(CamelCaseORMModel):

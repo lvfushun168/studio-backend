@@ -16,6 +16,13 @@ class ORMModel(BaseModel):
     )
 
 
+class CamelCaseModel(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=_to_camel_case,
+    )
+
+
 class CamelCaseORMModel(BaseModel):
     """Base model that serializes fields to camelCase."""
     model_config = ConfigDict(

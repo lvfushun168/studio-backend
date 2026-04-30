@@ -671,3 +671,204 @@ def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) ->
     )
     assert resubmit_response.status_code == 200
     assert resubmit_response.json()["action"] == "resubmit"
+
+
+def test_auth_login_cookie_and_bearer_token_flow(client: TestClient) -> None:
+    login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    assert login.status_code == 200
+    payload = login.json()
+    assert payload["user"]["username"] == "admin"
+    token = payload["token"]
+
+    bearer_me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert bearer_me.status_code == 200
+    assert bearer_me.json()["role"] == "admin"
+
+    logout = client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {token}"})
+    assert logout.status_code == 200
+    invalid_after_logout = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert invalid_after_logout.status_code == 401
+
+
+def test_admin_account_prompt_dashboard_and_audit_endpoints(client: TestClient) -> None:
+    headers = {"X-User-ID": "1"}
+    create_account = client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={
+            "name": "联调账号",
+            "email": "integration-account@example.com",
+            "status": "active",
+            "project_ids": [1],
+            "remark": "smoke",
+        },
+    )
+    assert create_account.status_code == 201
+    account = create_account.json()
+    assert account["projectIds"] == [1]
+
+    verify_account = client.post(
+        f"/api/v1/accounts/{account['id']}/verify",
+        headers=headers,
+        json={"status": "cooldown", "remark": "manual verify"},
+    )
+    assert verify_account.status_code == 200
+    assert verify_account.json()["status"] == "cooldown"
+
+    prompt = client.post(
+        "/api/v1/prompts",
+        headers=headers,
+        json={
+            "name": "联调 Prompt",
+            "content": "测试提示词",
+            "scope": "project",
+            "project_id": 1,
+            "resolution": "2k",
+        },
+    )
+    assert prompt.status_code == 201
+    prompt_id = prompt.json()["id"]
+
+    dashboard = client.get("/api/v1/admin/dashboard", headers=headers)
+    assert dashboard.status_code == 200
+    assert dashboard.json()["accountCount"] >= 1
+
+    audits = client.get("/api/v1/admin/audit-logs", headers=headers)
+    assert audits.status_code == 200
+    assert any(item["action"] == "prompt.create" and item["targetType"] == "prompt" for item in audits.json())
+
+    delete_prompt = client.delete(f"/api/v1/prompts/{prompt_id}", headers=headers)
+    assert delete_prompt.status_code == 204
+
+
+def test_generation_templates_image_groups_tasks_and_results_flow(client: TestClient) -> None:
+    headers = {"X-User-ID": "5"}
+    group = client.post(
+        "/api/v1/image-groups",
+        headers=headers,
+        json={
+            "name": "联调图组",
+            "description": "smoke",
+            "project_id": 1,
+            "images": [
+                {
+                    "name": "ref.png",
+                    "url": "https://example.com/ref.png",
+                    "sort_order": 0,
+                }
+            ],
+        },
+    )
+    assert group.status_code == 201
+    image_group = group.json()
+    assert len(image_group["images"]) == 1
+
+    template = client.post(
+        "/api/v1/templates",
+        headers=headers,
+        json={
+            "name": "联调模板",
+            "description": "smoke",
+            "snapshot": {
+                "imageGroupId": image_group["id"],
+                "prompt": "测试模板",
+                "aspectRatio": "auto",
+                "resolution": "2k",
+                "count": 4,
+            },
+        },
+    )
+    assert template.status_code == 201
+
+    task = client.post(
+        "/api/v1/generation/tasks",
+        headers=headers,
+        json={
+            "project_id": 1,
+            "scene_id": 1,
+            "stage": "keyframe",
+            "image_group_id": image_group["id"],
+            "prompt_content": "测试生成任务",
+            "status": "pending",
+        },
+    )
+    assert task.status_code == 201
+    task_id = task.json()["id"]
+
+    result = client.post(
+        "/api/v1/generation/results",
+        headers=headers,
+        json={
+            "task_id": task_id,
+            "project_id": 1,
+            "scene_id": 1,
+            "stage": "keyframe",
+            "image_group_id": image_group["id"],
+            "name": "联调结果图",
+            "url": "https://example.com/result.png",
+            "status": "pending",
+        },
+    )
+    assert result.status_code == 201
+    result_id = result.json()["id"]
+
+    submit = client.post(
+        f"/api/v1/generation/results/{result_id}/submit",
+        headers=headers,
+        json={"name": "联调结果图_待审"},
+    )
+    assert submit.status_code == 200
+    assert submit.json()["status"] == "submitted"
+
+    review = client.post(
+        f"/api/v1/generation/results/{result_id}/review",
+        headers={"X-User-ID": "2"},
+        json={"status": "approved", "comment": "通过"},
+    )
+    assert review.status_code == 200
+    assert review.json()["status"] == "approved"
+
+    approved = client.get("/api/v1/generation/results/approved", headers=headers, params={"scene_id": 1})
+    assert approved.status_code == 200
+    assert any(item["id"] == result_id for item in approved.json())
+
+
+def test_admin_user_project_membership_and_password_management(client: TestClient) -> None:
+    admin_headers = {"X-User-ID": "1"}
+    create_user = client.post(
+        "/api/v1/users",
+        headers=admin_headers,
+        json={
+            "username": "newadminflow",
+            "display_name": "新用户",
+            "email": "newadminflow@example.com",
+            "role": "artist",
+            "password": "initpass123",
+            "is_active": True,
+            "project_ids": [1],
+        },
+    )
+    assert create_user.status_code == 201
+    user = create_user.json()
+    assert user["projectIds"] == [1]
+
+    rotate = client.post(f"/api/v1/users/{user['id']}/rotate-api-key", headers=admin_headers)
+    assert rotate.status_code == 200
+    assert rotate.json()["apiKey"]
+
+    reset_password = client.post(
+        f"/api/v1/users/{user['id']}/reset-password",
+        headers=admin_headers,
+        json={"new_password": "newpass123"},
+    )
+    assert reset_password.status_code == 200
+
+    login = client.post("/api/v1/auth/login", json={"username": "newadminflow", "password": "newpass123"})
+    assert login.status_code == 200
+
+    update_project_members = client.post(
+        "/api/v1/projects/1/members",
+        headers={"X-User-ID": "2"},
+        json={"user_id": user["id"], "role_in_project": "artist"},
+    )
+    assert update_project_members.status_code in {200, 409}

@@ -1,3 +1,15 @@
+from app.models.admin import (
+    AccountPoolAccount,
+    AccountProjectMembership,
+    AuditLog,
+    AuthSession,
+    GenerationResult,
+    GenerationTask,
+    GenerationTemplate,
+    ImageGroup,
+    ImageGroupImage,
+    PromptTemplate,
+)
 from app.models.annotation import Annotation, AnnotationAttachment
 from app.models.asset import Asset, AssetAttachment
 from app.models.async_job import AsyncJob
@@ -12,14 +24,24 @@ from app.models.workflow import ReviewRecord
 __all__ = [
     "Annotation",
     "AnnotationAttachment",
+    "AccountPoolAccount",
+    "AccountProjectMembership",
     "Asset",
     "AssetAttachment",
     "AsyncJob",
+    "AuditLog",
+    "AuthSession",
     "BankMaterial",
     "BankReference",
     "Episode",
+    "GenerationResult",
+    "GenerationTask",
+    "GenerationTemplate",
+    "ImageGroup",
+    "ImageGroupImage",
     "Notification",
     "Project",
+    "PromptTemplate",
     "Reference",
     "ReviewRecord",
     "Scene",

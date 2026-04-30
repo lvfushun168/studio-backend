@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Seed minimal demo data for frontend integration testing."""
 
+from datetime import datetime
+
 from pathlib import Path
 import sys
 
@@ -12,7 +14,18 @@ if str(ROOT_DIR) not in sys.path:
 
 from app.core.auth import generate_api_key
 from app.core.database import SessionLocal
+from app.core.security import hash_password
 from app.domains.stage_templates import build_default_stage_progress
+from app.models.admin import (
+    AccountPoolAccount,
+    AccountProjectMembership,
+    GenerationResult,
+    GenerationTask,
+    GenerationTemplate,
+    ImageGroup,
+    ImageGroupImage,
+    PromptTemplate,
+)
 from app.models.annotation import Annotation, AnnotationAttachment
 from app.models.asset import Asset, AssetAttachment
 from app.models.bank import BankMaterial, BankReference
@@ -27,6 +40,16 @@ def clear_tables(db) -> None:
     """Clear all data using TRUNCATE with CASCADE."""
     tables = [
         "references",
+        "audit_logs",
+        "auth_sessions",
+        "generation_results",
+        "generation_tasks",
+        "generation_templates",
+        "image_group_images",
+        "image_groups",
+        "prompt_templates",
+        "account_project_memberships",
+        "account_pool_accounts",
         "notifications",
         "annotation_attachments",
         "annotations",
@@ -60,14 +83,14 @@ def seed() -> None:
 
         # 1. Users
         users = [
-            User(username="admin", display_name="系统管理员", email="admin@studio.com", role="admin", api_key=generate_api_key(), is_active=True),
-            User(username="director1", display_name="导演A", email="director.a@studio.com", role="director", api_key=generate_api_key(), is_active=True),
-            User(username="director2", display_name="导演B", email="director.b@studio.com", role="director", api_key=generate_api_key(), is_active=True),
-            User(username="producer1", display_name="制片人小王", email="producer@studio.com", role="producer", api_key=generate_api_key(), is_active=True),
-            User(username="artist1", display_name="画师小红", email="artist.red@studio.com", role="artist", api_key=generate_api_key(), is_active=True),
-            User(username="artist2", display_name="画师小明", email="artist.ming@studio.com", role="artist", api_key=generate_api_key(), is_active=True),
-            User(username="artist3", display_name="画师小蓝", email="artist.blue@studio.com", role="artist", api_key=generate_api_key(), is_active=True),
-            User(username="visitor1", display_name="访客小张", email="visitor.zhang@studio.com", role="visitor", api_key=generate_api_key(), is_active=True),
+            User(username="admin", display_name="系统管理员", email="admin@studio.com", role="admin", api_key=generate_api_key(), password_hash=hash_password("admin123"), is_active=True),
+            User(username="director1", display_name="导演A", email="director.a@studio.com", role="director", api_key=generate_api_key(), password_hash=hash_password("director123"), is_active=True),
+            User(username="director2", display_name="导演B", email="director.b@studio.com", role="director", api_key=generate_api_key(), password_hash=hash_password("director123"), is_active=True),
+            User(username="producer1", display_name="制片人小王", email="producer@studio.com", role="producer", api_key=generate_api_key(), password_hash=hash_password("producer123"), is_active=True),
+            User(username="artist1", display_name="画师小红", email="artist.red@studio.com", role="artist", api_key=generate_api_key(), password_hash=hash_password("artist123"), is_active=True),
+            User(username="artist2", display_name="画师小明", email="artist.ming@studio.com", role="artist", api_key=generate_api_key(), password_hash=hash_password("artist123"), is_active=True),
+            User(username="artist3", display_name="画师小蓝", email="artist.blue@studio.com", role="artist", api_key=generate_api_key(), password_hash=hash_password("artist123"), is_active=True),
+            User(username="visitor1", display_name="访客小张", email="visitor.zhang@studio.com", role="visitor", api_key=generate_api_key(), password_hash=hash_password("visitor123"), is_active=True),
         ]
         db.add_all(users)
         db.flush()
@@ -263,6 +286,73 @@ def seed() -> None:
             Notification(project_id=p1.id, user_id=user_map["artist1"], type="review", title="SC001 AI抽卡已通过", content="导演A 通过了 SC001 的AI抽卡审批", status="unread"),
         ]
         db.add_all(notifications)
+
+        # 15. Account pool
+        accounts = [
+            AccountPoolAccount(name="工作室主账号", email="studio.main@gmail.com", provider="gemini", status="active", success_count=1248, fail_count=12, remark="主力账号，优先使用", created_by=user_map["admin"]),
+            AccountPoolAccount(name="备用账号A", email="backup.a@gmail.com", provider="gemini", status="active", success_count=856, fail_count=8, created_by=user_map["admin"]),
+            AccountPoolAccount(name="备用账号B", email="backup.b@gmail.com", provider="gemini", status="cooldown", success_count=623, fail_count=45, remark="近期失败率较高，冷却中", created_by=user_map["admin"]),
+        ]
+        db.add_all(accounts)
+        db.flush()
+        db.add_all(
+            [
+                AccountProjectMembership(account_id=accounts[0].id, project_id=p1.id),
+                AccountProjectMembership(account_id=accounts[0].id, project_id=p2.id),
+                AccountProjectMembership(account_id=accounts[1].id, project_id=p1.id),
+                AccountProjectMembership(account_id=accounts[2].id, project_id=p2.id),
+            ]
+        )
+
+        # 16. Prompts
+        prompts = [
+            PromptTemplate(name="通用角色立绘", content="生成一位动漫风格角色立绘，全身，纯白背景，高精度，细节丰富", aspect_ratio="auto", resolution="2k", scope="global", use_count=156, created_by=user_map["admin"]),
+            PromptTemplate(name="奇幻角色服装方案", content="为奇幻冒险角色设计服装方案，包含三视图，华丽的魔法袍，配饰精致", aspect_ratio="16:9", resolution="4k", scope="project", project_id=p1.id, use_count=89, created_by=user_map["director1"]),
+            PromptTemplate(name="小红的私有模板", content="日系萌系角色设计，大眼睛，可爱表情，柔和光影", aspect_ratio="auto", resolution="1k", scope="private", user_id=user_map["artist1"], use_count=23, created_by=user_map["artist1"]),
+        ]
+        db.add_all(prompts)
+        db.flush()
+
+        # 17. Image groups
+        groups = [
+            ImageGroup(name="主角A参考图集", description="主角A的角色设定参考图片", project_id=p1.id, user_id=user_map["artist1"]),
+            ImageGroup(name="服装材质参考", description="各种布料材质参考图片", project_id=p1.id, user_id=user_map["director1"], is_shared=True),
+            ImageGroup(name="小蓝私有图组", description="个人收集的参考图", user_id=user_map["artist3"]),
+        ]
+        db.add_all(groups)
+        db.flush()
+        db.add_all(
+            [
+                ImageGroupImage(image_group_id=groups[0].id, name="ref_01.jpg", url="https://picsum.photos/seed/ref101/300/400", sort_order=0),
+                ImageGroupImage(image_group_id=groups[0].id, name="ref_02.jpg", url="https://picsum.photos/seed/ref102/300/400", sort_order=1),
+                ImageGroupImage(image_group_id=groups[1].id, name="fabric_01.jpg", url="https://picsum.photos/seed/fabric301/300/300", sort_order=0),
+                ImageGroupImage(image_group_id=groups[2].id, name="private_01.jpg", url="https://picsum.photos/seed/private501/300/300", sort_order=0),
+            ]
+        )
+
+        # 18. Generation templates
+        templates = [
+            GenerationTemplate(name="一原通用模板", description="动漫风格全身立绘", snapshot_json={"imageGroupId": groups[0].id, "prompt": prompts[0].content, "aspectRatio": "auto", "resolution": "2k", "count": 4}, user_id=user_map["artist1"], created_by=user_map["artist1"]),
+            GenerationTemplate(name="服装方案模板", description="奇幻冒险服装三视图", snapshot_json={"imageGroupId": groups[1].id, "prompt": prompts[1].content, "aspectRatio": "16:9", "resolution": "4k", "count": 4}, project_id=p1.id, created_by=user_map["director1"]),
+        ]
+        db.add_all(templates)
+        db.flush()
+
+        # 19. Generation tasks and results
+        tasks = [
+            GenerationTask(user_id=user_map["artist1"], project_id=p1.id, scene_id=scene_objs[0].id, stage_key="keyframe", account_id=accounts[0].id, image_group_id=groups[0].id, prompt_id=prompts[0].id, prompt_content=prompts[0].content, aspect_ratio="auto", resolution="2k", status="success", result_count=4, requested_count=4, completed_at=datetime.utcnow()),
+            GenerationTask(user_id=user_map["artist2"], project_id=p1.id, scene_id=scene_objs[1].id, stage_key="keyframe", account_id=accounts[0].id, image_group_id=groups[1].id, prompt_id=prompts[1].id, prompt_content=prompts[1].content, aspect_ratio="16:9", resolution="4k", status="running", result_count=0, requested_count=4),
+            GenerationTask(user_id=user_map["artist3"], project_id=p2.id, scene_id=scene_objs[6].id, stage_key="inbetween", account_id=accounts[2].id, image_group_id=groups[2].id, prompt_content="自定义提示词：科幻机甲战士立绘", aspect_ratio="auto", resolution="2k", status="failed", result_count=0, requested_count=4, fail_reason="账号调用超时，请稍后重试"),
+        ]
+        db.add_all(tasks)
+        db.flush()
+        results = [
+            GenerationResult(task_id=tasks[0].id, user_id=user_map["artist1"], project_id=p1.id, scene_id=scene_objs[0].id, stage_key="keyframe", image_group_id=groups[0].id, prompt_id=prompts[0].id, name="EP01_SC01_keyframe_01_0418", url="https://picsum.photos/seed/result1/400/600", thumbnail_url="https://picsum.photos/seed/result1/200/300", status="approved", review_comment="构图不错，光影方向统一", reviewed_by=user_map["director1"], reviewed_at=datetime.utcnow()),
+            GenerationResult(task_id=tasks[0].id, user_id=user_map["artist1"], project_id=p1.id, scene_id=scene_objs[0].id, stage_key="keyframe", image_group_id=groups[0].id, prompt_id=prompts[0].id, name="EP01_SC01_keyframe_02_0418", url="https://picsum.photos/seed/result2/400/600", thumbnail_url="https://picsum.photos/seed/result2/200/300", status="rejected", review_comment="角色比例崩了，头部过大", reviewed_by=user_map["director1"], reviewed_at=datetime.utcnow()),
+            GenerationResult(task_id=tasks[0].id, user_id=user_map["artist1"], project_id=p1.id, scene_id=scene_objs[0].id, stage_key="keyframe", image_group_id=groups[0].id, prompt_id=prompts[0].id, name="EP01_SC01_keyframe_03_0418", url="https://picsum.photos/seed/result3/400/600", thumbnail_url="https://picsum.photos/seed/result3/200/300", status="submitted"),
+            GenerationResult(task_id=tasks[0].id, user_id=user_map["artist1"], project_id=p1.id, scene_id=scene_objs[0].id, stage_key="keyframe", image_group_id=groups[0].id, prompt_id=prompts[0].id, name="EP01_SC01_keyframe_04_0418", url="https://picsum.photos/seed/result4/400/600", thumbnail_url="https://picsum.photos/seed/result4/200/300", status="discarded"),
+        ]
+        db.add_all(results)
 
         db.commit()
         print("Seed data created successfully.")

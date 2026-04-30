@@ -1,15 +1,18 @@
 """Authentication and authorization utilities."""
 
 import secrets
+from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, status
 from fastapi.security import APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import hash_session_token
+from app.models.admin import AuthSession
 from app.models.project import UserProjectMembership
 from app.models.user import User
 
@@ -23,7 +26,9 @@ def generate_api_key() -> str:
 async def get_current_user(
     x_user_id: Annotated[str | None, Header()] = None,
     x_api_key: Annotated[str | None, Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
     api_key: Annotated[str | None, Depends(api_key_header)] = None,
+    studio_session: Annotated[str | None, Cookie()] = None,
     db: Session = Depends(get_db),
 ) -> User:
     """Resolve current user from headers.
@@ -59,6 +64,33 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
+        )
+
+    bearer = None
+    if authorization and authorization.lower().startswith("bearer "):
+        bearer = authorization[7:].strip()
+    elif studio_session:
+        bearer = studio_session
+
+    if bearer:
+        stmt = (
+            select(AuthSession)
+            .join(User, User.id == AuthSession.user_id)
+            .where(
+                AuthSession.token_hash == hash_session_token(bearer),
+                AuthSession.revoked_at.is_(None),
+                AuthSession.expires_at > datetime.now(timezone.utc),
+                User.is_active == True,
+            )
+        )
+        session = db.scalar(stmt)
+        if session:
+            session.last_seen_at = datetime.now(timezone.utc)
+            db.commit()
+            return session.user
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session token",
         )
 
     # Explicit development fallback only when configured.

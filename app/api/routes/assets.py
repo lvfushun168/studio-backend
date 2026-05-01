@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.auth import CurrentUser, get_accessible_project_ids, require_project_access
 from app.core.database import get_db
+from app.models.annotation import Annotation
 from app.models.asset import Asset, AssetAttachment
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
 
@@ -239,6 +240,14 @@ def delete_asset(
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     require_project_access(asset.project_id, current_user, db)
+    annotation_count = db.scalar(
+        select(func.count(Annotation.id)).where(Annotation.target_asset_id == asset.id)
+    ) or 0
+    if annotation_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Asset has linked annotations and cannot be deleted",
+        )
     db.delete(asset)
     db.commit()
 

@@ -6,12 +6,16 @@ from datetime import datetime
 from pathlib import Path
 import sys
 
+import cv2
+import numpy as np
 from sqlalchemy import text
+from PIL import Image
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from app.core.config import settings
 from app.core.auth import generate_api_key
 from app.core.database import SessionLocal
 from app.core.security import hash_password
@@ -34,6 +38,72 @@ from app.models.project import Episode, Project, SceneAssignment, SceneGroup, Us
 from app.models.reference import Reference
 from app.models.scene import Scene, StageProgress
 from app.models.user import User
+
+
+def ensure_demo_media_files() -> dict[str, str]:
+    """Create deterministic demo media files used by seed data."""
+    media_root = settings.media_root_path
+    demo_dir = media_root / "demo"
+    annotation_dir = demo_dir / "annotations"
+    demo_dir.mkdir(parents=True, exist_ok=True)
+    annotation_dir.mkdir(parents=True, exist_ok=True)
+
+    def create_jpeg(path: Path, color: tuple[int, int, int], label: str) -> None:
+        if path.exists():
+            return
+        image = Image.new("RGB", (960, 540), color)
+        image.save(path, format="JPEG", quality=92)
+
+    def create_png(path: Path, color: tuple[int, int, int, int]) -> None:
+        if path.exists():
+            return
+        image = Image.new("RGBA", (960, 540), color)
+        image.save(path, format="PNG")
+
+    def create_mp4(path: Path) -> None:
+        if path.exists():
+            return
+        writer = cv2.VideoWriter(
+            str(path),
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            6.0,
+            (640, 360),
+        )
+        for idx in range(18):
+            frame = np.zeros((360, 640, 3), dtype=np.uint8)
+            frame[:] = (40 + idx * 4, 70 + idx * 3, 120 + idx * 2)
+            cv2.putText(
+                frame,
+                f"SC005 PREVIEW {idx + 1:02d}",
+                (40, 185),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            writer.write(frame)
+        writer.release()
+
+    create_jpeg(demo_dir / "ai_result_v1.jpg", (85, 120, 180), "AI V1")
+    create_jpeg(demo_dir / "ai_result_v2.jpg", (120, 90, 160), "AI V2")
+    create_jpeg(demo_dir / "char_design_hero.jpg", (150, 110, 90), "HERO")
+    create_jpeg(demo_dir / "bg_forest.jpg", (60, 120, 80), "FOREST")
+    create_jpeg(demo_dir / "scene005_preview.jpg", (80, 80, 120), "PREVIEW")
+    create_png(annotation_dir / "frame142-overlay.png", (255, 0, 0, 80))
+    create_png(annotation_dir / "frame142-merged.png", (255, 255, 255, 255))
+    create_mp4(demo_dir / "scene005_preview.mp4")
+
+    return {
+        "ai_result_v1": "demo/ai_result_v1.jpg",
+        "ai_result_v2": "demo/ai_result_v2.jpg",
+        "char_design_hero": "demo/char_design_hero.jpg",
+        "bg_forest": "demo/bg_forest.jpg",
+        "scene005_preview_mp4": "demo/scene005_preview.mp4",
+        "scene005_preview_jpg": "demo/scene005_preview.jpg",
+        "overlay_png": "demo/annotations/frame142-overlay.png",
+        "merged_png": "demo/annotations/frame142-merged.png",
+    }
 
 
 def clear_tables(db) -> None:
@@ -80,6 +150,7 @@ def seed() -> None:
 
     try:
         clear_tables(db)
+        demo_media = ensure_demo_media_files()
 
         # 1. Users
         users = [
@@ -197,16 +268,16 @@ def seed() -> None:
         # 9. Assets
         assets = [
             Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="storyboard", media_type="image", filename="board_sc01.jpg", original_name="board_sc01.jpg", storage_path="", version=1, note="初版分镜", uploaded_by=user_map["artist1"]),
-            Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="ai_draw", media_type="image", filename="ai_result_v1.jpg", original_name="ai_result.jpg", storage_path="", public_url="/media/demo/ai_result_v1.jpg", version=1, note="第一轮抽卡", uploaded_by=user_map["artist1"]),
-            Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="ai_draw", media_type="image", filename="ai_result_v2.jpg", original_name="ai_result.jpg", storage_path="", public_url="/media/demo/ai_result_v2.jpg", version=2, note="光影修正版", uploaded_by=user_map["artist1"]),
+            Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="ai_draw", media_type="image", filename="ai_result_v1.jpg", original_name="ai_result.jpg", storage_path=demo_media["ai_result_v1"], public_url=f'/media/{demo_media["ai_result_v1"]}', version=1, note="第一轮抽卡", uploaded_by=user_map["artist1"]),
+            Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="ai_draw", media_type="image", filename="ai_result_v2.jpg", original_name="ai_result.jpg", storage_path=demo_media["ai_result_v2"], public_url=f'/media/{demo_media["ai_result_v2"]}', version=2, note="光影修正版", uploaded_by=user_map["artist1"]),
             Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="correction", media_type="binary", filename="correct_v1.psd", original_name="correct_v1.psd", storage_path="", version=1, note="修正初稿", uploaded_by=user_map["artist1"]),
             Asset(project_id=p1.id, scene_id=scene_objs[0].id, scene_group_id=g1.id, stage_key="reference", media_type="image", filename="ref_pose.jpg", original_name="ref_pose.jpg", storage_path="", version=1, uploaded_by=user_map["artist1"]),
             Asset(project_id=p1.id, scene_id=scene_objs[1].id, scene_group_id=g1.id, stage_key="storyboard", media_type="image", filename="board_sc02.jpg", original_name="board_sc02.jpg", storage_path="", version=1, uploaded_by=user_map["artist2"]),
             Asset(project_id=p1.id, scene_id=scene_objs[2].id, scene_group_id=g1.id, stage_key="storyboard", media_type="image", filename="board_sc03.jpg", original_name="board_sc03.jpg", storage_path="", version=1, uploaded_by=user_map["artist2"]),
             Asset(project_id=p1.id, scene_id=scene_objs[2].id, scene_group_id=g1.id, stage_key="layout_character", media_type="image", filename="lo_char_v1.psd", original_name="lo_char_v1.psd", storage_path="", version=1, note="LO人物初稿", uploaded_by=user_map["artist2"]),
-            Asset(project_id=p1.id, scene_group_id=g1.id, stage_key="reference", media_type="image", is_global=True, filename="char_design_hero.jpg", original_name="char_design_hero.jpg", storage_path="", version=1, note="主角人设图", uploaded_by=user_map["director1"]),
-            Asset(project_id=p1.id, scene_group_id=g1.id, stage_key="reference", media_type="image", is_global=True, filename="bg_forest.jpg", original_name="bg_forest.jpg", storage_path="", version=1, note="森林背景设定", uploaded_by=user_map["director1"]),
-            Asset(project_id=p1.id, scene_id=scene_objs[4].id, scene_group_id=g2.id, stage_key="final", media_type="video", filename="scene005_preview.mp4", original_name="scene005_preview.mp4", storage_path="", public_url="/media/demo/scene005_preview.mp4", thumbnail_url="/media/demo/scene005_preview.jpg", version=1, note="导演预览片段", metadata_json={"durationSeconds": 2.4, "width": 1920, "height": 1080}, uploaded_by=user_map["artist3"]),
+            Asset(project_id=p1.id, scene_group_id=g1.id, stage_key="reference", media_type="image", is_global=True, filename="char_design_hero.jpg", original_name="char_design_hero.jpg", storage_path=demo_media["char_design_hero"], public_url=f'/media/{demo_media["char_design_hero"]}', version=1, note="主角人设图", uploaded_by=user_map["director1"]),
+            Asset(project_id=p1.id, scene_group_id=g1.id, stage_key="reference", media_type="image", is_global=True, filename="bg_forest.jpg", original_name="bg_forest.jpg", storage_path=demo_media["bg_forest"], public_url=f'/media/{demo_media["bg_forest"]}', version=1, note="森林背景设定", uploaded_by=user_map["director1"]),
+            Asset(project_id=p1.id, scene_id=scene_objs[4].id, scene_group_id=g2.id, stage_key="final", media_type="video", filename="scene005_preview.mp4", original_name="scene005_preview.mp4", storage_path=demo_media["scene005_preview_mp4"], public_url=f'/media/{demo_media["scene005_preview_mp4"]}', thumbnail_path=demo_media["scene005_preview_jpg"], thumbnail_url=f'/media/{demo_media["scene005_preview_jpg"]}', version=1, note="导演预览片段", metadata_json={"durationSeconds": 3.0, "width": 640, "height": 360}, uploaded_by=user_map["artist3"]),
         ]
         db.add_all(assets)
         db.flush()
@@ -236,8 +307,10 @@ def seed() -> None:
                 frame_number=142,
                 timestamp_seconds=1.184,
                 canvas_json={"objects": [{"type": "circle"}]},
-                overlay_url="/media/demo/annotations/frame142-overlay.png",
-                merged_url="/media/demo/annotations/frame142-merged.png",
+                overlay_path=demo_media["overlay_png"],
+                overlay_url=f'/media/{demo_media["overlay_png"]}',
+                merged_path=demo_media["merged_png"],
+                merged_url=f'/media/{demo_media["merged_png"]}',
                 summary="第142帧角色手臂透视需要修正",
             ),
         ]

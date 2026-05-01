@@ -20,8 +20,15 @@ class Settings(BaseSettings):
     )
 
     @property
+    def backend_root_path(self) -> Path:
+        return Path(__file__).resolve().parents[2]
+
+    @property
     def media_root_path(self) -> Path:
-        return Path(self.media_root).resolve()
+        media_root = Path(self.media_root)
+        if media_root.is_absolute():
+            return media_root.resolve()
+        return (self.backend_root_path / media_root).resolve()
 
 
 settings = Settings()

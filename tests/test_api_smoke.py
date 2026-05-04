@@ -162,6 +162,37 @@ def test_project_with_audit_history_cannot_be_hard_deleted(client: TestClient) -
     assert delete_response.json()["detail"] == "项目已有审计历史，不能直接删除，请改为归档"
 
 
+def test_project_cover_can_be_uploaded(client: TestClient) -> None:
+    headers = {"X-User-ID": "4"}
+    create_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "name": "封面项目",
+            "description": "smoke",
+            "project_type": "single",
+            "status": "active",
+        },
+    )
+    assert create_response.status_code == 201
+    project_id = create_response.json()["id"]
+
+    image_buffer = BytesIO()
+    Image.new("RGB", (320, 240), (24, 120, 220)).save(image_buffer, format="PNG")
+    upload_response = client.post(
+        f"/api/v1/upload/projects/{project_id}/cover",
+        headers=headers,
+        files={"file": ("cover.png", image_buffer.getvalue(), "image/png")},
+    )
+    assert upload_response.status_code == 200
+    assert upload_response.json()["cover_url"].startswith("/media/projects/")
+
+    list_response = client.get("/api/v1/projects", headers=headers)
+    assert list_response.status_code == 200
+    project = next(item for item in list_response.json() if item["id"] == project_id)
+    assert project["coverUrl"].startswith("/media/projects/")
+
+
 def test_assets_are_scoped_to_project_membership(client: TestClient) -> None:
     response = client.get("/api/v1/assets", headers={"X-User-ID": "5"})
     assert response.status_code == 200

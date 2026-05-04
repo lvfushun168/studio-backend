@@ -5,11 +5,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.auth import CurrentUser, require_project_access
+from app.core.auth import CurrentUser, DIRECTOR_PRODUCER_ROLES, require_project_access, require_role
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.annotation import Annotation, AnnotationAttachment
 from app.models.asset import Asset, AssetAttachment
+from app.models.project import Project
 from app.services.media_service import extract_image_metadata, extract_video_metadata, generate_video_thumbnail
 
 router = APIRouter()
@@ -36,6 +37,37 @@ def _detect_media_type(filename: str | None) -> str:
     elif ext in ("mp4", "webm", "mov"):
         return "video"
     return "binary"
+
+
+@router.post("/projects/{project_id}/cover", response_model=dict)
+def upload_project_cover(
+    project_id: int,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    require_project_access(project_id, current_user, db)
+
+    media_type = _detect_media_type(file.filename)
+    if media_type != "image":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目封面仅支持图片文件")
+
+    subdir = f"projects/{project_id}/cover"
+    storage_path, public_url, _ = _save_uploaded_file(file, subdir)
+    project.cover_path = storage_path
+    project.cover_url = public_url
+    db.commit()
+    db.refresh(project)
+    return {
+        "project_id": project.id,
+        "cover_path": project.cover_path,
+        "cover_url": project.cover_url,
+    }
 
 
 @router.post("/assets/{asset_id}/file", response_model=dict)

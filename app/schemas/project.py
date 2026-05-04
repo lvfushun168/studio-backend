@@ -37,6 +37,8 @@ class ProjectRead(CamelCaseORMModel):
     id: int
     name: str
     description: str | None
+    cover_path: str | None = None
+    cover_url: str | None = None
     project_type: str = Field(serialization_alias="type")
     status: str
     deadline_at: datetime | None

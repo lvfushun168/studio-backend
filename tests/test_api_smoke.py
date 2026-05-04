@@ -659,6 +659,44 @@ def test_bank_reference_ref_count_and_detach(client: TestClient) -> None:
     assert delete_response.status_code == 400
 
 
+def test_bank_material_can_be_updated(client: TestClient) -> None:
+    headers = {"X-User-ID": "4"}
+    material_create = client.post(
+        "/api/v1/bank/materials",
+        headers=headers,
+        json={
+            "project_id": 1,
+            "source_asset_id": 2,
+            "name": "更新前素材",
+            "character_name": "主角",
+            "part_name": "头部",
+            "pose": "站立",
+            "angle": "正面",
+        },
+    )
+    assert material_create.status_code == 201
+    material = material_create.json()
+
+    update_response = client.put(
+        f"/api/v1/bank/materials/{material['id']}",
+        headers=headers,
+        json={
+            "name": "更新后素材",
+            "character_name": "路飞",
+            "part_name": "身体",
+            "pose": "坐姿",
+            "angle": "侧面",
+        },
+    )
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["name"] == "更新后素材"
+    assert updated["character"] == "路飞"
+    assert updated["part"] == "身体"
+    assert updated["pose"] == "坐姿"
+    assert updated["angle"] == "侧面"
+
+
 def test_reference_validation_and_summary(client: TestClient) -> None:
     headers = {"X-User-ID": "2"}
     create_response = client.post(

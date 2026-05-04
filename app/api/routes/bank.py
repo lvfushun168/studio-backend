@@ -14,6 +14,7 @@ from app.models.bank import BankMaterial, BankReference
 from app.schemas.bank import (
     BankMaterialCreate,
     BankMaterialRead,
+    BankMaterialUpdate,
     BankReferenceCreate,
     BankReferenceDetach,
     BankReferenceRead,
@@ -94,6 +95,38 @@ def get_bank_material(
     if not material:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankMaterial not found")
     require_project_access(material.project_id, current_user, db)
+    return material
+
+
+@router.put("/materials/{material_id}", response_model=BankMaterialRead)
+def update_bank_material(
+    material_id: int,
+    payload: BankMaterialUpdate,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> BankMaterial:
+    material = db.get(BankMaterial, material_id)
+    if not material:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BankMaterial not found")
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
+    require_project_access(material.project_id, current_user, db)
+
+    if payload.name is not None:
+        material.name = payload.name
+    if payload.character_name is not None:
+        material.character_name = payload.character_name
+    if payload.part_name is not None:
+        material.part_name = payload.part_name
+    if payload.pose is not None:
+        material.pose = payload.pose
+    if payload.angle is not None:
+        material.angle = payload.angle
+    if payload.status is not None:
+        material.status = payload.status
+
+    db.add(material)
+    db.commit()
+    db.refresh(material)
     return material
 
 

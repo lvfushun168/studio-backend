@@ -17,6 +17,15 @@ class BankMaterialCreate(BaseModel):
     angle: str | None = None
 
 
+class BankMaterialUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    character_name: str | None = None
+    part_name: str | None = None
+    pose: str | None = None
+    angle: str | None = None
+    status: str | None = Field(default=None, pattern="^(active|archived)$")
+
+
 class BankMaterialRead(CamelCaseORMModel):
     id: int
     project_id: int

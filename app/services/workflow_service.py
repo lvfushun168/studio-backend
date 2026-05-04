@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domains.stage_templates import STAGE_TEMPLATES
+from app.models.asset import Asset
 from app.models.notification import Notification
 from app.models.scene import Scene, StageProgress
 from app.models.workflow import ReviewRecord
@@ -132,6 +133,19 @@ def submit_stage(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot submit from status '{sp.status}'",
         )
+
+    if stage_key != "ai_draw":
+        asset_exists = db.scalar(
+            select(Asset.id).where(
+                Asset.scene_id == scene.id,
+                Asset.stage_key == stage_key,
+            ).limit(1)
+        )
+        if asset_exists is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Stage '{stage_key}' has no assets and cannot be submitted",
+            )
 
     from_status = sp.status
     sp.status = "reviewing"

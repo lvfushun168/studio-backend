@@ -142,6 +142,26 @@ def test_project_creator_is_added_to_membership(client: TestClient) -> None:
     assert project_id in visible_project_ids
 
 
+def test_project_with_audit_history_cannot_be_hard_deleted(client: TestClient) -> None:
+    headers = {"X-User-ID": "4"}
+    create_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "name": "不可硬删项目",
+            "description": "smoke",
+            "project_type": "single",
+            "status": "active",
+        },
+    )
+    assert create_response.status_code == 201
+    project_id = create_response.json()["id"]
+
+    delete_response = client.delete(f"/api/v1/projects/{project_id}", headers=headers)
+    assert delete_response.status_code == 409
+    assert delete_response.json()["detail"] == "Project has audit history and cannot be hard-deleted; archive it instead"
+
+
 def test_assets_are_scoped_to_project_membership(client: TestClient) -> None:
     response = client.get("/api/v1/assets", headers={"X-User-ID": "5"})
     assert response.status_code == 200

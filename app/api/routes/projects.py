@@ -9,6 +9,7 @@ from app.core.auth import (
     require_role,
 )
 from app.core.database import get_db
+from app.models.admin import AuditLog
 from app.models.project import Project, UserProjectMembership
 from app.schemas.project import ProjectCreate, ProjectMemberWrite, ProjectRead, ProjectUpdate
 from app.services.audit_service import record_audit
@@ -153,6 +154,12 @@ def delete_project(
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    has_audit_history = db.scalar(select(AuditLog.id).where(AuditLog.project_id == project_id).limit(1))
+    if has_audit_history:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Project has audit history and cannot be hard-deleted; archive it instead",
+        )
     record_audit(
         db,
         user_id=current_user.id,

@@ -36,10 +36,23 @@ def _get_media_path(asset: Asset) -> Path | None:
 
 
 def _load_font(size: int) -> ImageFont.ImageFont:
-    try:
-        return ImageFont.truetype("Arial.ttf", size)
-    except OSError:
-        return ImageFont.load_default()
+    font_candidates = [
+        "PingFang SC.ttc",
+        "PingFang.ttc",
+        "Hiragino Sans GB.ttc",
+        "STHeiti Medium.ttc",
+        "Arial Unicode.ttf",
+        "Arial Unicode MS.ttf",
+        "NotoSansCJK-Regular.ttc",
+        "NotoSansSC-Regular.otf",
+        "Arial.ttf",
+    ]
+    for candidate in font_candidates:
+        try:
+            return ImageFont.truetype(candidate, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
 
 
 def _parse_color(value: str | None, default: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
@@ -253,11 +266,6 @@ def generate_annotation_artifacts(annotation: Annotation, asset: Asset) -> dict[
     base_image = _load_base_image(asset, annotation)
     overlay = Image.new("RGBA", base_image.size, (0, 0, 0, 0))
     _draw_canvas_objects(overlay, annotation.canvas_json)
-
-    if annotation.summary:
-        summary_draw = ImageDraw.Draw(overlay)
-        summary_draw.rounded_rectangle((24, 24, min(base_image.size[0] - 24, 680), 92), radius=16, fill=(0, 0, 0, 160))
-        summary_draw.text((40, 42), annotation.summary, font=_load_font(28), fill=(255, 255, 255, 255))
 
     merged = Image.alpha_composite(base_image, overlay)
     return _save_overlay_and_merged(base_dir, overlay, merged)

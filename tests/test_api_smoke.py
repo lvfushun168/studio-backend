@@ -159,7 +159,7 @@ def test_project_with_audit_history_cannot_be_hard_deleted(client: TestClient) -
 
     delete_response = client.delete(f"/api/v1/projects/{project_id}", headers=headers)
     assert delete_response.status_code == 409
-    assert delete_response.json()["detail"] == "Project has audit history and cannot be hard-deleted; archive it instead"
+    assert delete_response.json()["detail"] == "项目已有审计历史，不能直接删除，请改为归档"
 
 
 def test_assets_are_scoped_to_project_membership(client: TestClient) -> None:

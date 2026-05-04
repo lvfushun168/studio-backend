@@ -158,7 +158,7 @@ def delete_project(
     if has_audit_history:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Project has audit history and cannot be hard-deleted; archive it instead",
+            detail="项目已有审计历史，不能直接删除，请改为归档",
         )
     record_audit(
         db,

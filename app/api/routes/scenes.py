@@ -18,6 +18,7 @@ from app.domains.stage_templates import build_default_stage_progress
 from app.models.project import SceneAssignment, SceneGroup
 from app.models.asset import Asset
 from app.models.scene import Scene, StageProgress
+from app.models.workflow import ReviewRecord
 from app.schemas.scene import (
     SceneAssignmentRead,
     SceneBatchSortRequest,
@@ -258,6 +259,14 @@ def delete_scene(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
+    review_count = db.scalar(
+        select(ReviewRecord.id).where(ReviewRecord.scene_id == scene.id).limit(1)
+    )
+    if review_count is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Scene with review history cannot be deleted",
+        )
     db.delete(scene)
     db.commit()
 

@@ -21,6 +21,25 @@ def _is_layout_stage(stage_key: str) -> bool:
     return stage_key in ("layout_character", "layout_background")
 
 
+def _get_unlock_targets(scene: Scene, stage_key: str) -> list[str]:
+    keys = _get_template_keys(scene.stage_template)
+    try:
+        current_idx = keys.index(stage_key)
+    except ValueError:
+        return []
+
+    if (
+        stage_key == "storyboard"
+        and "layout_character" in keys
+        and "layout_background" in keys
+    ):
+        return ["layout_character", "layout_background"]
+
+    if current_idx + 1 < len(keys):
+        return [keys[current_idx + 1]]
+    return []
+
+
 def _check_layout_unlock(scene: Scene, db: Session) -> str | None:
     keys = _get_template_keys(scene.stage_template)
     if "layout_character" not in keys or "layout_background" not in keys:
@@ -206,10 +225,6 @@ def approve_stage(
     db.add(record)
     records.append(record)
 
-    # Unlock next stage
-    keys = _get_template_keys(scene.stage_template)
-    current_idx = keys.index(stage_key)
-
     if _is_layout_stage(stage_key):
         next_key = _check_layout_unlock(scene, db)
         if next_key:
@@ -221,8 +236,7 @@ def approve_stage(
             if next_sp and next_sp.status == "locked":
                 next_sp.status = "pending"
     else:
-        if current_idx + 1 < len(keys):
-            next_key = keys[current_idx + 1]
+        for next_key in _get_unlock_targets(scene, stage_key):
             next_stmt = select(StageProgress).where(
                 StageProgress.scene_id == scene.id,
                 StageProgress.stage_key == next_key,

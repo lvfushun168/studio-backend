@@ -7,6 +7,7 @@ from app.core.auth import CurrentUser, get_accessible_project_ids, require_proje
 from app.core.database import get_db
 from app.models.annotation import Annotation
 from app.models.asset import Asset, AssetAttachment
+from app.models.scene import StageProgress
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
 
 router = APIRouter()
@@ -248,6 +249,18 @@ def delete_asset(
             status_code=status.HTTP_409_CONFLICT,
             detail="Asset has linked annotations and cannot be deleted",
         )
+    if asset.scene_id is not None:
+        stage_progress = db.scalar(
+            select(StageProgress).where(
+                StageProgress.scene_id == asset.scene_id,
+                StageProgress.stage_key == asset.stage_key,
+            )
+        )
+        if stage_progress and stage_progress.status == "approved":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Approved stage assets cannot be deleted",
+            )
     db.delete(asset)
     db.commit()
 

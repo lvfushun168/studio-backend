@@ -268,6 +268,138 @@ def test_scene_matrix_returns_flattened_scenes_and_latest_assets(client: TestCli
     assert scene["latestAssets"]["ai_draw"]["version"] == 2
 
 
+def test_standard_storyboard_approval_unlocks_both_layout_branches(client: TestClient) -> None:
+    director_headers = {"X-User-ID": "2"}
+    artist_headers = {"X-User-ID": "5"}
+
+    create_response = client.post(
+        "/api/v1/scenes",
+        headers=director_headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "name": "SC_STANDARD_UNLOCK",
+            "level": "B",
+            "stage_template": "standard",
+            "pipeline": "standard",
+        },
+    )
+    assert create_response.status_code == 201
+    scene_id = create_response.json()["id"]
+
+    submit_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/submit",
+        headers=artist_headers,
+        json={"stage_key": "storyboard"},
+    )
+    assert submit_response.status_code == 200
+
+    approve_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/approve",
+        headers=director_headers,
+        json={"stage_key": "storyboard"},
+    )
+    assert approve_response.status_code == 200
+
+    scene_response = client.get(f"/api/v1/scenes/{scene_id}", headers=director_headers)
+    assert scene_response.status_code == 200
+    stage_progress = scene_response.json()["stageProgress"]
+    assert stage_progress["layout_character"]["status"] == "pending"
+    assert stage_progress["layout_background"]["status"] == "pending"
+
+
+def test_approved_stage_asset_cannot_be_deleted(client: TestClient) -> None:
+    director_headers = {"X-User-ID": "2"}
+    artist_headers = {"X-User-ID": "5"}
+
+    create_scene_response = client.post(
+        "/api/v1/scenes",
+        headers=director_headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "name": "SC_APPROVED_ASSET_LOCK",
+            "level": "B",
+            "stage_template": "ai_single_frame",
+            "pipeline": "ai_single_frame",
+        },
+    )
+    assert create_scene_response.status_code == 201
+    scene_id = create_scene_response.json()["id"]
+
+    submit_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/submit",
+        headers=artist_headers,
+        json={"stage_key": "storyboard"},
+    )
+    assert submit_response.status_code == 200
+
+    approve_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/approve",
+        headers=director_headers,
+        json={"stage_key": "storyboard"},
+    )
+    assert approve_response.status_code == 200
+
+    create_asset_response = client.post(
+        "/api/v1/assets",
+        headers=artist_headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "scene_id": scene_id,
+            "stage_key": "storyboard",
+            "asset_type": "original",
+            "media_type": "image",
+            "original_name": "approved_storyboard.png",
+        },
+    )
+    assert create_asset_response.status_code == 201
+    asset_id = create_asset_response.json()["id"]
+
+    delete_response = client.delete(f"/api/v1/assets/{asset_id}", headers=artist_headers)
+    assert delete_response.status_code == 409
+    assert delete_response.json()["detail"] == "Approved stage assets cannot be deleted"
+
+
+def test_scene_with_review_history_cannot_be_deleted(client: TestClient) -> None:
+    director_headers = {"X-User-ID": "2"}
+    artist_headers = {"X-User-ID": "5"}
+
+    create_scene_response = client.post(
+        "/api/v1/scenes",
+        headers=director_headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "name": "SC_DELETE_GUARD",
+            "level": "B",
+            "stage_template": "ai_single_frame",
+            "pipeline": "ai_single_frame",
+        },
+    )
+    assert create_scene_response.status_code == 201
+    scene_id = create_scene_response.json()["id"]
+
+    submit_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/submit",
+        headers=artist_headers,
+        json={"stage_key": "storyboard"},
+    )
+    assert submit_response.status_code == 200
+
+    approve_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/approve",
+        headers=director_headers,
+        json={"stage_key": "storyboard"},
+    )
+    assert approve_response.status_code == 200
+
+    delete_response = client.delete(f"/api/v1/scenes/{scene_id}", headers=director_headers)
+    assert delete_response.status_code == 409
+    assert delete_response.json()["detail"] == "Scene with review history cannot be deleted"
+
+
 def test_annotation_update_and_attachment_roundtrip(client: TestClient) -> None:
     headers = {"X-User-ID": "2"}
     image_buffer = BytesIO()

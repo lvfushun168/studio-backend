@@ -319,33 +319,6 @@ def reject_stage(
     db.add(record)
     records.append(record)
 
-    # Rollback: previous stage becomes "in_progress" again
-    prev_key = _find_previous_stage_key(scene, stage_key)
-    if prev_key:
-        prev_stmt = select(StageProgress).where(
-            StageProgress.scene_id == scene.id,
-            StageProgress.stage_key == prev_key,
-        )
-        prev_sp = db.scalar(prev_stmt)
-        if prev_sp and prev_sp.status == "approved":
-            prev_from = prev_sp.status
-            prev_sp.status = "in_progress"
-            prev_sp.approved_at = None
-            # Create a record for the rollback
-            rollback_record = ReviewRecord(
-                project_id=scene.project_id,
-                scene_id=scene.id,
-                stage_progress_id=prev_sp.id,
-                stage_key=prev_key,
-                action="rollback",
-                from_status=prev_from,
-                to_status="in_progress",
-                operator_id=user_id,
-                comment=f"Auto-rollback due to rejection of {stage_key}",
-            )
-            db.add(rollback_record)
-            records.append(rollback_record)
-
     # Notify assignees about rejection
     _notify_scene_assignees(
         db,

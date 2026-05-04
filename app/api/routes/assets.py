@@ -7,10 +7,15 @@ from app.core.auth import CurrentUser, get_accessible_project_ids, require_proje
 from app.core.database import get_db
 from app.models.annotation import Annotation
 from app.models.asset import Asset, AssetAttachment
-from app.models.scene import StageProgress
+from app.models.scene import Scene, StageProgress
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
 
 router = APIRouter()
+
+
+class AssetReferenceCreatePayload(BaseModel):
+    scene_id: int
+    stage_key: str
 
 
 @router.get("", response_model=list[AssetRead])
@@ -193,6 +198,80 @@ def create_asset(
     db.add(asset)
     db.commit()
     stmt = select(Asset).options(selectinload(Asset.attachments)).where(Asset.id == asset.id)
+    return db.scalar(stmt)
+
+
+@router.post("/{asset_id}/reference", response_model=AssetRead, status_code=status.HTTP_201_CREATED)
+def create_asset_reference(
+    asset_id: int,
+    payload: AssetReferenceCreatePayload,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> Asset:
+    source_asset = db.get(Asset, asset_id)
+    if not source_asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    require_project_access(source_asset.project_id, current_user, db)
+    if not source_asset.is_global or source_asset.scene_id is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only global scene-group assets can be referenced")
+
+    target_scene = db.get(Scene, payload.scene_id)
+    if not target_scene or target_scene.project_id != source_asset.project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target scene not found in project")
+    if target_scene.scene_group_id != source_asset.scene_group_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can only reference assets within the same scene group")
+
+    existing_assets = db.scalars(
+        select(Asset).where(
+            Asset.project_id == source_asset.project_id,
+            Asset.scene_id == payload.scene_id,
+            Asset.stage_key == payload.stage_key,
+            Asset.original_name == source_asset.original_name,
+        )
+    ).all()
+    for existing_asset in existing_assets:
+        metadata = existing_asset.metadata_json or {}
+        if metadata.get("sourceAssetId") == source_asset.id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该通用资产已引用到当前阶段")
+
+    group_filter = [
+        Asset.project_id == source_asset.project_id,
+        Asset.scene_id == payload.scene_id,
+        Asset.scene_group_id == target_scene.scene_group_id,
+        Asset.stage_key == payload.stage_key,
+        Asset.asset_type == "original",
+        Asset.original_name == source_asset.original_name,
+    ]
+    next_version = (db.scalar(select(func.max(Asset.version)).where(*group_filter)) or 0) + 1
+
+    metadata = dict(source_asset.metadata_json or {})
+    metadata["sourceAssetId"] = source_asset.id
+    metadata["sourceType"] = "global_asset"
+    metadata["sourceStageKey"] = source_asset.stage_key
+
+    referenced_asset = Asset(
+        project_id=source_asset.project_id,
+        scene_group_id=target_scene.scene_group_id,
+        scene_id=payload.scene_id,
+        stage_key=payload.stage_key,
+        asset_type="original",
+        media_type=source_asset.media_type,
+        is_global=False,
+        filename=source_asset.filename,
+        original_name=source_asset.original_name,
+        extension=source_asset.extension,
+        storage_path=source_asset.storage_path,
+        public_url=source_asset.public_url,
+        thumbnail_path=source_asset.thumbnail_path,
+        thumbnail_url=source_asset.thumbnail_url,
+        version=next_version,
+        note=f"引用自通用资产：{source_asset.original_name}",
+        metadata_json=metadata,
+        uploaded_by=current_user.id,
+    )
+    db.add(referenced_asset)
+    db.commit()
+    stmt = select(Asset).options(selectinload(Asset.attachments)).where(Asset.id == referenced_asset.id)
     return db.scalar(stmt)
 
 

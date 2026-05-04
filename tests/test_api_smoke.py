@@ -968,7 +968,12 @@ def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) ->
     assert reject_response.status_code == 200
     reject_records = reject_response.json()
     assert any(item["action"] == "reject" and item["toStatus"] == "rejected" for item in reject_records)
-    assert any(item["action"] == "rollback" and item["stageKey"] == "storyboard" for item in reject_records)
+    assert not any(item["action"] == "rollback" for item in reject_records)
+
+    scene_after_reject = client.get(f"/api/v1/scenes/{scene_id}", headers={"X-User-ID": "2"})
+    assert scene_after_reject.status_code == 200
+    assert scene_after_reject.json()["stageProgress"]["storyboard"]["status"] == "approved"
+    assert scene_after_reject.json()["stageProgress"]["ai_draw"]["status"] == "rejected"
 
     resubmit_response = client.post(
         f"/api/v1/workflow/scenes/{scene_id}/resubmit",
@@ -1006,6 +1011,48 @@ def test_submit_stage_requires_existing_assets(client: TestClient) -> None:
     )
     assert submit_response.status_code == 409
     assert submit_response.json()["detail"] == "Stage 'storyboard' has no assets and cannot be submitted"
+
+
+def test_global_asset_can_be_referenced_into_scene_stage(client: TestClient) -> None:
+    headers = {"X-User-ID": "4"}
+    global_asset_response = client.post(
+        "/api/v1/assets",
+        headers=headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "scene_id": None,
+            "stage_key": "reference",
+            "asset_type": "original",
+            "media_type": "image",
+            "is_global": True,
+            "original_name": "group_reference.png",
+        },
+    )
+    assert global_asset_response.status_code == 201
+    source_asset = global_asset_response.json()
+
+    image_buffer = BytesIO()
+    Image.new("RGB", (160, 120), (180, 90, 20)).save(image_buffer, format="PNG")
+    upload_response = client.post(
+        f"/api/v1/upload/assets/{source_asset['id']}/file",
+        headers=headers,
+        files={"file": ("group_reference.png", image_buffer.getvalue(), "image/png")},
+    )
+    assert upload_response.status_code == 200
+    source_asset_id = upload_response.json()["asset_id"]
+
+    reference_response = client.post(
+        f"/api/v1/assets/{source_asset_id}/reference",
+        headers={"X-User-ID": "5"},
+        json={"scene_id": 1, "stage_key": "storyboard"},
+    )
+    assert reference_response.status_code == 201
+    referenced_asset = reference_response.json()
+    assert referenced_asset["sceneId"] == 1
+    assert referenced_asset["type"] == "storyboard"
+    assert referenced_asset["url"] == f"/media/{referenced_asset['storagePath']}"
+    assert referenced_asset["metadataJson"]["sourceAssetId"] == source_asset_id
 
 
 def test_auth_login_cookie_and_bearer_token_flow(client: TestClient) -> None:

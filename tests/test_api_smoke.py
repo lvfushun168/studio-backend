@@ -697,6 +697,8 @@ def test_bank_material_can_be_updated(client: TestClient) -> None:
     assert updated["angle"] == "侧面"
 
 
+
+
 def test_reference_validation_and_summary(client: TestClient) -> None:
     headers = {"X-User-ID": "2"}
     create_response = client.post(

@@ -78,6 +78,92 @@ def _draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[float, float], end: tupl
     draw.polygon([end, left, right], fill=color)
 
 
+def _sample_quadratic_bezier(
+    start: tuple[float, float],
+    control: tuple[float, float],
+    end: tuple[float, float],
+    steps: int = 24,
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for idx in range(steps + 1):
+        t = idx / steps
+        x = ((1 - t) ** 2) * start[0] + (2 * (1 - t) * t * control[0]) + (t ** 2) * end[0]
+        y = ((1 - t) ** 2) * start[1] + (2 * (1 - t) * t * control[1]) + (t ** 2) * end[1]
+        points.append((x, y))
+    return points
+
+
+def _sample_cubic_bezier(
+    start: tuple[float, float],
+    control1: tuple[float, float],
+    control2: tuple[float, float],
+    end: tuple[float, float],
+    steps: int = 24,
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for idx in range(steps + 1):
+        t = idx / steps
+        x = (
+            ((1 - t) ** 3) * start[0]
+            + 3 * ((1 - t) ** 2) * t * control1[0]
+            + 3 * (1 - t) * (t ** 2) * control2[0]
+            + (t ** 3) * end[0]
+        )
+        y = (
+            ((1 - t) ** 3) * start[1]
+            + 3 * ((1 - t) ** 2) * t * control1[1]
+            + 3 * (1 - t) * (t ** 2) * control2[1]
+            + (t ** 3) * end[1]
+        )
+        points.append((x, y))
+    return points
+
+
+def _draw_fabric_path(
+    draw: ImageDraw.ImageDraw,
+    path_commands: list[list[float | str]],
+    color: tuple[int, int, int, int],
+    width: int,
+) -> None:
+    if not path_commands:
+        return
+
+    current: tuple[float, float] | None = None
+    subpath_start: tuple[float, float] | None = None
+    sampled_points: list[tuple[float, float]] = []
+
+    for command in path_commands:
+        if not command:
+            continue
+        code = str(command[0]).upper()
+        values = [float(item) for item in command[1:]]
+
+        if code == "M" and len(values) >= 2:
+            current = (values[0], values[1])
+            subpath_start = current
+            sampled_points.append(current)
+        elif code == "L" and current is not None and len(values) >= 2:
+            current = (values[0], values[1])
+            sampled_points.append(current)
+        elif code == "Q" and current is not None and len(values) >= 4:
+            control = (values[0], values[1])
+            end = (values[2], values[3])
+            sampled_points.extend(_sample_quadratic_bezier(current, control, end)[1:])
+            current = end
+        elif code == "C" and current is not None and len(values) >= 6:
+            control1 = (values[0], values[1])
+            control2 = (values[2], values[3])
+            end = (values[4], values[5])
+            sampled_points.extend(_sample_cubic_bezier(current, control1, control2, end)[1:])
+            current = end
+        elif code == "Z" and current is not None and subpath_start is not None:
+            sampled_points.append(subpath_start)
+            current = subpath_start
+
+    if len(sampled_points) >= 2:
+        draw.line(sampled_points, fill=color, width=width, joint="curve")
+
+
 def _draw_canvas_objects(image: Image.Image, canvas_json: dict[str, Any] | None) -> None:
     draw = ImageDraw.Draw(image)
     objects = (canvas_json or {}).get("objects") or []
@@ -103,6 +189,8 @@ def _draw_canvas_objects(image: Image.Image, canvas_json: dict[str, Any] | None)
             x2 = float(obj.get("x2", left + obj_width))
             y2 = float(obj.get("y2", top + obj_height))
             draw.line([x1, y1, x2, y2], fill=stroke, width=width)
+        elif obj_type in {"path"}:
+            _draw_fabric_path(draw, obj.get("path") or [], stroke, width)
         elif obj_type in {"arrow"}:
             x1 = float(obj.get("x1", left))
             y1 = float(obj.get("y1", top))

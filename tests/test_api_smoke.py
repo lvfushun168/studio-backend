@@ -934,6 +934,20 @@ def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) ->
     assert submit_record["action"] == "submit"
     assert submit_record["toStatus"] == "reviewing"
 
+    director_notifications_after_submit = client.get("/api/v1/notifications", headers={"X-User-ID": "2"})
+    assert director_notifications_after_submit.status_code == 200
+    submit_notification = next(
+        (
+            item for item in director_notifications_after_submit.json()
+            if item["type"] == "review_required"
+            and item["payloadJson"]["scene_id"] == scene_id
+            and item["payloadJson"]["stage"] == "storyboard"
+        ),
+        None,
+    )
+    assert submit_notification is not None
+    assert submit_notification["status"] == "unread"
+
     approve_response = client.post(
         f"/api/v1/workflow/scenes/{scene_id}/approve",
         headers={"X-User-ID": "2"},
@@ -942,6 +956,11 @@ def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) ->
     assert approve_response.status_code == 200
     approve_records = approve_response.json()
     assert any(item["action"] == "approve" and item["toStatus"] == "approved" for item in approve_records)
+
+    director_notifications_after_approve = client.get("/api/v1/notifications", headers={"X-User-ID": "2"})
+    assert director_notifications_after_approve.status_code == 200
+    approved_notification = next(item for item in director_notifications_after_approve.json() if item["id"] == submit_notification["id"])
+    assert approved_notification["status"] == "read"
 
     scene_after_approve = client.get(f"/api/v1/scenes/{scene_id}", headers={"X-User-ID": "2"})
     assert scene_after_approve.status_code == 200

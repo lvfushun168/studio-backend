@@ -94,6 +94,29 @@ def _create_notification(
     db.add(n)
 
 
+def _mark_review_required_notifications_read(
+    db: Session,
+    project_id: int,
+    scene_id: int,
+    stage_key: str,
+    user_id: int,
+) -> None:
+    """Treat approval handling as consuming the matching review-required notification."""
+    stmt = select(Notification).where(
+        Notification.project_id == project_id,
+        Notification.user_id == user_id,
+        Notification.type == "review_required",
+        Notification.status == "unread",
+    )
+    notifications = db.scalars(stmt).all()
+    for notification in notifications:
+        payload = notification.payload_json or {}
+        if payload.get("scene_id") != scene_id or payload.get("stage") != stage_key:
+            continue
+        notification.status = "read"
+        notification.read_at = datetime.now(timezone.utc)
+
+
 def _notify_scene_assignees(
     db: Session,
     scene: Scene,
@@ -239,6 +262,14 @@ def approve_stage(
     db.add(record)
     records.append(record)
 
+    _mark_review_required_notifications_read(
+        db,
+        scene.project_id,
+        scene.id,
+        stage_key,
+        user_id,
+    )
+
     if _is_layout_stage(stage_key):
         next_key = _check_layout_unlock(scene, db)
         if next_key:
@@ -318,6 +349,14 @@ def reject_stage(
     )
     db.add(record)
     records.append(record)
+
+    _mark_review_required_notifications_read(
+        db,
+        scene.project_id,
+        scene.id,
+        stage_key,
+        user_id,
+    )
 
     # Notify assignees about rejection
     _notify_scene_assignees(

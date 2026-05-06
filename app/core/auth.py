@@ -38,7 +38,7 @@ async def get_current_user(
     2. X-API-Key header or API-Key query param
     """
     # Development mode: direct user ID
-    if x_user_id is not None:
+    if x_user_id is not None and settings.allow_x_user_id_auth:
         try:
             user_id = int(x_user_id)
         except ValueError:

@@ -1,0 +1,11 @@
+.env
+.venv
+.venv310
+.pytest_cache
+__pycache__
+*.pyc
+.git
+.idea
+storage
+app.db
+backups

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,8 @@ class Settings(BaseSettings):
     cookie_encryption_key: str = ""
     default_model: str | None = None
     dev_default_user_id: int | None = None
+    allow_x_user_id_auth: bool = False
+    cors_allow_origins: str = "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -29,6 +32,24 @@ class Settings(BaseSettings):
         if media_root.is_absolute():
             return media_root.resolve()
         return (self.backend_root_path / media_root).resolve()
+
+    @property
+    def cors_allow_origins_list(self) -> list[str]:
+        return [item.strip() for item in self.cors_allow_origins.split(",") if item.strip()]
+
+    @field_validator("dev_default_user_id", mode="before")
+    @classmethod
+    def _empty_string_to_none(cls, value):
+        if value in ("", None):
+            return None
+        return value
+
+    @field_validator("default_model", mode="before")
+    @classmethod
+    def _empty_model_to_none(cls, value):
+        if value in ("", None):
+            return None
+        return value
 
 
 settings = Settings()

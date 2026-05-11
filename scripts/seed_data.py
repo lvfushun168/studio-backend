@@ -235,7 +235,7 @@ def seed() -> None:
 
         # 7. StageProgresses with demo statuses
         def _create_sp(scene, overrides):
-            items = build_default_stage_progress(scene.stage_template, scene.project_id, scene.id)
+            items = build_default_stage_progress(db, scene.stage_template, scene.project_id, scene.id)
             for item in items:
                 item["status"] = overrides.get(item["stage_key"], item["status"])
                 db.add(StageProgress(**item))
@@ -248,7 +248,7 @@ def seed() -> None:
         _create_sp(scene_objs[5], {"storyboard": "approved", "ai_draw": "pending"})
         _create_sp(scene_objs[6], {"storyboard": "approved", "layout_character": "approved", "layout_background": "approved", "keyframe": "reviewing"})
         for s in scene_objs[7:]:
-            for item in build_default_stage_progress(s.stage_template, s.project_id, s.id):
+            for item in build_default_stage_progress(db, s.stage_template, s.project_id, s.id):
                 db.add(StageProgress(**item))
 
         # 8. SceneAssignments

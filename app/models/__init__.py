@@ -19,7 +19,7 @@ from app.models.project import Episode, Project, SceneAssignment, SceneGroup, Us
 from app.models.reference import Reference
 from app.models.scene import Scene, StageProgress
 from app.models.user import User
-from app.models.workflow import ReviewRecord
+from app.models.workflow import ReviewRecord, WorkflowTemplate
 
 __all__ = [
     "Annotation",
@@ -50,4 +50,5 @@ __all__ = [
     "StageProgress",
     "User",
     "UserProjectMembership",
+    "WorkflowTemplate",
 ]

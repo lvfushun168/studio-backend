@@ -231,6 +231,111 @@ def test_role_boundaries_for_scene_and_workflow_operations(client: TestClient) -
     assert visitor_submit.status_code == 403
 
 
+def test_project_workflow_template_can_drive_scene_flow_and_freeze_structure(client: TestClient) -> None:
+    producer_headers = {"X-User-ID": "4"}
+    director_headers = {"X-User-ID": "2"}
+    artist_headers = {"X-User-ID": "5"}
+
+    template_response = client.post(
+        "/api/v1/workflow-templates",
+        headers=producer_headers,
+        json={
+            "project_id": 1,
+            "name": "极简镜头流程",
+            "description": "只保留一个 storyboard 审批步骤",
+            "is_default": True,
+            "steps": [
+                {
+                    "key": "storyboard",
+                    "label": "分镜",
+                    "needs_review": True,
+                }
+            ],
+        },
+    )
+    assert template_response.status_code == 201
+    template_payload = template_response.json()
+    assert template_payload["templateKey"].startswith("project_template:")
+    assert template_payload["sceneCount"] == 0
+    assert template_payload["stepStructureLocked"] is False
+
+    list_response = client.get("/api/v1/workflow-templates", params={"project_id": 1}, headers=producer_headers)
+    assert list_response.status_code == 200
+    assert any(item["id"] == template_payload["id"] and item["isDefault"] for item in list_response.json())
+
+    scene_response = client.post(
+        "/api/v1/scenes",
+        headers=director_headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "name": "CUSTOM_TEMPLATE_SCENE",
+            "level": "B",
+            "stage_template": template_payload["templateKey"],
+            "pipeline": template_payload["templateKey"],
+        },
+    )
+    assert scene_response.status_code == 201
+    scene_payload = scene_response.json()
+    assert list(scene_payload["stageProgress"].keys()) == ["storyboard"]
+
+    asset_response = client.post(
+        "/api/v1/assets",
+        headers=artist_headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "scene_id": scene_payload["id"],
+            "stage_key": "storyboard",
+            "asset_type": "original",
+            "media_type": "image",
+            "original_name": "custom-template-storyboard.png",
+        },
+    )
+    assert asset_response.status_code == 201
+
+    submit_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_payload['id']}/submit",
+        headers=artist_headers,
+        json={"stage_key": "storyboard"},
+    )
+    assert submit_response.status_code == 200
+
+    approve_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_payload['id']}/approve",
+        headers=director_headers,
+        json={"stage_key": "storyboard"},
+    )
+    assert approve_response.status_code == 200
+
+    refreshed_scene = client.get(f"/api/v1/scenes/{scene_payload['id']}", headers=director_headers)
+    assert refreshed_scene.status_code == 200
+    assert refreshed_scene.json()["stageProgress"]["storyboard"]["status"] == "approved"
+
+    locked_template_response = client.get("/api/v1/workflow-templates", params={"project_id": 1}, headers=producer_headers)
+    locked_template = next(item for item in locked_template_response.json() if item["id"] == template_payload["id"])
+    assert locked_template["sceneCount"] == 1
+    assert locked_template["stepStructureLocked"] is True
+
+    update_response = client.put(
+        f"/api/v1/workflow-templates/{template_payload['id']}",
+        headers=producer_headers,
+        json={
+            "steps": [
+                {"key": "storyboard", "label": "分镜", "needs_review": True},
+                {"key": "final", "label": "完成", "needs_review": True},
+            ]
+        },
+    )
+    assert update_response.status_code == 409
+
+    delete_response = client.delete(
+        f"/api/v1/workflow-templates/{template_payload['id']}",
+        headers=producer_headers,
+    )
+    assert delete_response.status_code == 409
+
+
 def test_assets_and_annotations_are_scoped_to_project_membership(client: TestClient) -> None:
     asset_response = client.get("/api/v1/assets", headers={"X-User-ID": "6"})
     annotation_response = client.get("/api/v1/annotations", headers={"X-User-ID": "6"})

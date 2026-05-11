@@ -14,7 +14,7 @@ from app.core.auth import (
     is_project_member,
 )
 from app.core.database import get_db
-from app.domains.stage_templates import build_default_stage_progress
+from app.domains.stage_templates import build_default_stage_progress, get_template_keys, stage_template_exists
 from app.models.project import SceneAssignment, SceneGroup
 from app.models.asset import Asset
 from app.models.scene import Scene, StageProgress
@@ -144,6 +144,8 @@ def create_scene(
 ) -> Scene:
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(payload.project_id, current_user, db)
+    if not stage_template_exists(db, payload.stage_template, payload.project_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage template not found")
     scene = Scene(
         project_id=payload.project_id,
         scene_group_id=payload.scene_group_id,
@@ -161,7 +163,7 @@ def create_scene(
     db.add(scene)
     db.flush()
 
-    for item in build_default_stage_progress(payload.stage_template, payload.project_id, scene.id):
+    for item in build_default_stage_progress(db, payload.stage_template, payload.project_id, scene.id):
         db.add(StageProgress(**item))
 
     db.commit()
@@ -390,8 +392,7 @@ def rollback_stage(
             detail=f"Cannot rollback stage with status '{sp.status}'",
         )
 
-    from app.domains.stage_templates import STAGE_TEMPLATES
-    keys = [item["key"] for item in STAGE_TEMPLATES.get(scene.stage_template, STAGE_TEMPLATES["ai_single_frame"])]
+    keys = get_template_keys(db, scene.stage_template, scene.project_id)
     try:
         idx = keys.index(stage_key)
     except ValueError:

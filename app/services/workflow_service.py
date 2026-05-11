@@ -7,23 +7,19 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.domains.stage_templates import STAGE_TEMPLATES
+from app.domains.stage_templates import get_template_keys
 from app.models.asset import Asset
 from app.models.notification import Notification
 from app.models.scene import Scene, StageProgress
 from app.models.workflow import ReviewRecord
 
 
-def _get_template_keys(stage_template: str) -> list[str]:
-    return [item["key"] for item in STAGE_TEMPLATES.get(stage_template, STAGE_TEMPLATES["ai_single_frame"])]
-
-
 def _is_layout_stage(stage_key: str) -> bool:
     return stage_key in ("layout_character", "layout_background")
 
 
-def _get_unlock_targets(scene: Scene, stage_key: str) -> list[str]:
-    keys = _get_template_keys(scene.stage_template)
+def _get_unlock_targets(scene: Scene, stage_key: str, db: Session) -> list[str]:
+    keys = get_template_keys(db, scene.stage_template, scene.project_id)
     try:
         current_idx = keys.index(stage_key)
     except ValueError:
@@ -42,7 +38,7 @@ def _get_unlock_targets(scene: Scene, stage_key: str) -> list[str]:
 
 
 def _check_layout_unlock(scene: Scene, db: Session) -> str | None:
-    keys = _get_template_keys(scene.stage_template)
+    keys = get_template_keys(db, scene.stage_template, scene.project_id)
     if "layout_character" not in keys or "layout_background" not in keys:
         return None
     progresses = {sp.stage_key: sp for sp in scene.stage_progresses}
@@ -55,8 +51,8 @@ def _check_layout_unlock(scene: Scene, db: Session) -> str | None:
     return None
 
 
-def _find_previous_stage_key(scene: Scene, current_key: str) -> str | None:
-    keys = _get_template_keys(scene.stage_template)
+def _find_previous_stage_key(scene: Scene, current_key: str, db: Session) -> str | None:
+    keys = get_template_keys(db, scene.stage_template, scene.project_id)
     try:
         idx = keys.index(current_key)
     except ValueError:
@@ -281,7 +277,7 @@ def approve_stage(
             if next_sp and next_sp.status == "locked":
                 next_sp.status = "pending"
     else:
-        for next_key in _get_unlock_targets(scene, stage_key):
+        for next_key in _get_unlock_targets(scene, stage_key, db):
             next_stmt = select(StageProgress).where(
                 StageProgress.scene_id == scene.id,
                 StageProgress.stage_key == next_key,

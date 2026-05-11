@@ -177,7 +177,86 @@ def _draw_fabric_path(
         draw.line(sampled_points, fill=color, width=width, joint="curve")
 
 
+def _get_canvas_meta(canvas_json: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(canvas_json, dict):
+        return {}
+    meta = canvas_json.get("__meta")
+    return meta if isinstance(meta, dict) else {}
+
+
+def _normalize_canvas_json(canvas_json: dict[str, Any] | None, target_size: tuple[int, int]) -> dict[str, Any]:
+    data = dict(canvas_json or {})
+    meta = _get_canvas_meta(data)
+    source_width = float(meta.get("canvasWidth") or meta.get("sourceWidth") or 0)
+    source_height = float(meta.get("canvasHeight") or meta.get("sourceHeight") or 0)
+    target_width = float(target_size[0] or 0)
+    target_height = float(target_size[1] or 0)
+
+    if not source_width or not source_height or not target_width or not target_height:
+        return data
+    if math.isclose(source_width, target_width) and math.isclose(source_height, target_height):
+        return data
+
+    scale_x = target_width / source_width
+    scale_y = target_height / source_height
+    normalized_objects = [_scale_canvas_object(obj, scale_x, scale_y) for obj in (data.get("objects") or [])]
+    data["objects"] = normalized_objects
+    data["__meta"] = {
+        **meta,
+        "canvasWidth": target_width,
+        "canvasHeight": target_height,
+        "sourceWidth": target_width,
+        "sourceHeight": target_height,
+    }
+    return data
+
+
+def _scale_canvas_object(obj: dict[str, Any], scale_x: float, scale_y: float) -> dict[str, Any]:
+    if not isinstance(obj, dict):
+        return obj
+    scaled = dict(obj)
+
+    for key in ("left", "width", "x1", "x2", "rx", "pathOffsetX"):
+        if isinstance(scaled.get(key), (int, float)):
+            scaled[key] = float(scaled[key]) * scale_x
+    for key in ("top", "height", "y1", "y2", "ry", "pathOffsetY"):
+        if isinstance(scaled.get(key), (int, float)):
+            scaled[key] = float(scaled[key]) * scale_y
+
+    if isinstance(scaled.get("radius"), (int, float)):
+        scaled["radius"] = float(scaled["radius"]) * ((scale_x + scale_y) / 2)
+    if isinstance(scaled.get("strokeWidth"), (int, float)):
+        scaled["strokeWidth"] = max(1.0, float(scaled["strokeWidth"]) * ((scale_x + scale_y) / 2))
+    if isinstance(scaled.get("fontSize"), (int, float)):
+        scaled["fontSize"] = max(1.0, float(scaled["fontSize"]) * ((scale_x + scale_y) / 2))
+
+    if isinstance(scaled.get("path"), list):
+        scaled["path"] = [_scale_path_command(segment, scale_x, scale_y) for segment in scaled["path"]]
+
+    return scaled
+
+
+def _scale_path_command(segment: list[Any], scale_x: float, scale_y: float) -> list[Any]:
+    if not isinstance(segment, list) or not segment:
+        return segment
+    command = str(segment[0]).upper()
+    values = list(segment[1:])
+    scaled_values: list[Any] = []
+    for index, value in enumerate(values):
+        if not isinstance(value, (int, float)):
+            scaled_values.append(value)
+            continue
+        if command == "H":
+            scaled_values.append(float(value) * scale_x)
+        elif command == "V":
+            scaled_values.append(float(value) * scale_y)
+        else:
+            scaled_values.append(float(value) * (scale_x if index % 2 == 0 else scale_y))
+    return [segment[0], *scaled_values]
+
+
 def _draw_canvas_objects(image: Image.Image, canvas_json: dict[str, Any] | None) -> None:
+    canvas_json = _normalize_canvas_json(canvas_json, image.size)
     draw = ImageDraw.Draw(image)
     objects = (canvas_json or {}).get("objects") or []
     font = _load_font(24)

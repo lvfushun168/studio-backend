@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.auth import CurrentUser, get_accessible_project_ids, require_project_access
 from app.core.database import get_db
 from app.models.annotation import Annotation
-from app.models.asset import Asset, AssetAttachment
+from app.models.asset import Asset, AssetAttachment, AssetFolder
 from app.models.scene import Scene, StageProgress
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
 
@@ -23,6 +23,7 @@ def list_assets(
     project_id: int | None = None,
     scene_id: int | None = None,
     scene_group_id: int | None = None,
+    folder_id: int | None = None,
     stage_key: str | None = None,
     is_global: bool | None = None,
     current_user: CurrentUser = None,
@@ -41,6 +42,8 @@ def list_assets(
         stmt = stmt.where(Asset.scene_id == scene_id)
     if scene_group_id is not None:
         stmt = stmt.where(Asset.scene_group_id == scene_group_id)
+    if folder_id is not None:
+        stmt = stmt.where(Asset.folder_id == folder_id)
     if stage_key is not None:
         stmt = stmt.where(Asset.stage_key == stage_key)
     if is_global is not None:
@@ -73,11 +76,12 @@ def list_latest_assets(
         base_where.append(Asset.is_global == is_global)
 
     # Find max version per group
-    group_cols = [Asset.scene_id, Asset.scene_group_id, Asset.stage_key, Asset.original_name]
+    group_cols = [Asset.scene_id, Asset.scene_group_id, Asset.folder_id, Asset.stage_key, Asset.original_name]
     subq = (
         select(
             Asset.scene_id,
             Asset.scene_group_id,
+            Asset.folder_id,
             Asset.stage_key,
             Asset.original_name,
             func.max(Asset.version).label("max_version"),
@@ -114,6 +118,7 @@ def list_latest_assets(
     for a in all_assets:
         key = (
             a.scene_id if a.scene_id is not None else a.scene_group_id,
+            a.folder_id,
             a.stage_key,
             a.asset_type,
             a.original_name,
@@ -142,6 +147,7 @@ def list_asset_versions(
             .options(selectinload(Asset.attachments))
             .where(
                 Asset.scene_id == asset.scene_id,
+                Asset.folder_id == asset.folder_id,
                 Asset.stage_key == asset.stage_key,
                 Asset.asset_type == asset.asset_type,
                 Asset.original_name == asset.original_name,
@@ -154,6 +160,7 @@ def list_asset_versions(
             .options(selectinload(Asset.attachments))
             .where(
                 Asset.scene_group_id == asset.scene_group_id,
+                Asset.folder_id == asset.folder_id,
                 Asset.stage_key == asset.stage_key,
                 Asset.asset_type == asset.asset_type,
                 Asset.original_name == asset.original_name,
@@ -170,10 +177,15 @@ def create_asset(
     db: Session = Depends(get_db),
 ) -> Asset:
     require_project_access(payload.project_id, current_user, db)
+    if payload.folder_id is not None:
+        folder = db.get(AssetFolder, payload.folder_id)
+        if not folder or folder.project_id != payload.project_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset folder not found in project")
     group_filter = [
         Asset.project_id == payload.project_id,
         Asset.scene_id == payload.scene_id,
         Asset.scene_group_id == payload.scene_group_id,
+        Asset.folder_id == payload.folder_id,
         Asset.stage_key == payload.stage_key,
         Asset.asset_type == payload.asset_type,
         Asset.original_name == payload.original_name,
@@ -183,6 +195,7 @@ def create_asset(
         project_id=payload.project_id,
         scene_group_id=payload.scene_group_id,
         scene_id=payload.scene_id,
+        folder_id=payload.folder_id,
         stage_key=payload.stage_key,
         asset_type=payload.asset_type,
         media_type=payload.media_type,
@@ -305,6 +318,16 @@ def update_asset(
         asset.note = payload.note
     if payload.is_global is not None:
         asset.is_global = payload.is_global
+    if "folder_id" in payload.model_fields_set:
+        if payload.folder_id is None:
+            asset.folder_id = None
+        else:
+            folder = db.get(AssetFolder, payload.folder_id)
+            if not folder or folder.project_id != asset.project_id:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset folder not found in project")
+            asset.folder_id = payload.folder_id
+    if "metadata_json" in payload.model_fields_set:
+        asset.metadata_json = payload.metadata_json
     db.commit()
     db.refresh(asset)
     return asset

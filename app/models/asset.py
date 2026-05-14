@@ -13,6 +13,7 @@ class Asset(TimestampMixin, Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     scene_group_id: Mapped[int | None] = mapped_column(ForeignKey("scene_groups.id"), nullable=True, index=True)
     scene_id: Mapped[int | None] = mapped_column(ForeignKey("scenes.id"), nullable=True, index=True)
+    folder_id: Mapped[int | None] = mapped_column(ForeignKey("asset_folders.id"), nullable=True, index=True)
     stage_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     asset_type: Mapped[str] = mapped_column(String(32), default="original", nullable=False)
     media_type: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -32,6 +33,21 @@ class Asset(TimestampMixin, Base):
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     attachments = relationship("AssetAttachment", back_populates="asset", cascade="all, delete-orphan")
+    folder = relationship("AssetFolder", back_populates="assets")
+
+
+class AssetFolder(TimestampMixin, Base):
+    __tablename__ = "asset_folders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("asset_folders.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    parent = relationship("AssetFolder", remote_side=[id], back_populates="children")
+    children = relationship("AssetFolder", back_populates="parent")
+    assets = relationship("Asset", back_populates="folder")
 
 
 class AssetAttachment(TimestampMixin, Base):

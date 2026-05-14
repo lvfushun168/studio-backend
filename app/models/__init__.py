@@ -11,7 +11,7 @@ from app.models.admin import (
     PromptTemplate,
 )
 from app.models.annotation import Annotation, AnnotationAttachment
-from app.models.asset import Asset, AssetAttachment
+from app.models.asset import Asset, AssetAttachment, AssetFolder
 from app.models.async_job import AsyncJob
 from app.models.bank import BankMaterial, BankReference
 from app.models.notification import Notification
@@ -28,6 +28,7 @@ __all__ = [
     "AccountProjectMembership",
     "Asset",
     "AssetAttachment",
+    "AssetFolder",
     "AsyncJob",
     "AuditLog",
     "AuthSession",

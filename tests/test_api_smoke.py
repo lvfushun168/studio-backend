@@ -201,6 +201,54 @@ def test_assets_are_scoped_to_project_membership(client: TestClient) -> None:
     assert all(item["projectId"] == 1 for item in payload)
 
 
+def test_producer_can_manage_asset_folders_and_library_metadata(client: TestClient) -> None:
+    producer_headers = {"X-User-ID": "4"}
+    artist_headers = {"X-User-ID": "5"}
+
+    folder_response = client.post(
+        "/api/v1/asset-folders",
+        headers=producer_headers,
+        json={"project_id": 1, "name": "角色设定", "parent_id": None},
+    )
+    assert folder_response.status_code == 201
+    folder_id = folder_response.json()["id"]
+
+    asset_response = client.post(
+        "/api/v1/assets",
+        headers=producer_headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": None,
+            "scene_id": None,
+            "folder_id": folder_id,
+            "stage_key": "reference",
+            "asset_type": "original",
+            "media_type": "image",
+            "is_global": True,
+            "original_name": "hero-design.png",
+            "metadata_json": {
+                "tags": ["主角", "正面"],
+                "publishedSceneGroupIds": [1],
+                "aiReady": True,
+            },
+        },
+    )
+    assert asset_response.status_code == 201
+    asset_id = asset_response.json()["id"]
+
+    list_response = client.get(
+        "/api/v1/assets",
+        headers=artist_headers,
+        params={"project_id": 1, "folder_id": folder_id},
+    )
+    assert list_response.status_code == 200
+    assert any(item["id"] == asset_id and item["folderId"] == folder_id for item in list_response.json())
+
+    folder_list_response = client.get("/api/v1/asset-folders", headers=artist_headers, params={"project_id": 1})
+    assert folder_list_response.status_code == 200
+    assert any(item["id"] == folder_id for item in folder_list_response.json())
+
+
 def test_role_boundaries_for_scene_and_workflow_operations(client: TestClient) -> None:
     visitor_create_scene = client.post(
         "/api/v1/scenes",

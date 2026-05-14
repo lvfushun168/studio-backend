@@ -22,6 +22,7 @@ class AssetCreate(BaseModel):
     project_id: int
     scene_group_id: int | None = None
     scene_id: int | None = None
+    folder_id: int | None = None
     stage_key: str
     asset_type: str = "original"
     media_type: str = "image"
@@ -36,6 +37,7 @@ class AssetRead(CamelCaseORMModel):
     project_id: int
     scene_group_id: int | None
     scene_id: int | None
+    folder_id: int | None
     stage_key: str = Field(serialization_alias="type")
     asset_type: str
     media_type: str
@@ -61,3 +63,5 @@ class AssetRead(CamelCaseORMModel):
 class AssetUpdate(BaseModel):
     note: str | None = None
     is_global: bool | None = None
+    folder_id: int | None = None
+    metadata_json: dict | None = None

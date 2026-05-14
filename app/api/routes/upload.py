@@ -91,12 +91,14 @@ def upload_asset_file(
     if asset.scene_id is not None:
         group_filter = (
             Asset.scene_id == asset.scene_id,
+            Asset.folder_id == asset.folder_id,
             Asset.stage_key == asset.stage_key,
             Asset.original_name == original_name,
         )
     else:
         group_filter = (
             Asset.scene_group_id == asset.scene_group_id,
+            Asset.folder_id == asset.folder_id,
             Asset.stage_key == asset.stage_key,
             Asset.original_name == original_name,
         )
@@ -145,6 +147,7 @@ def upload_asset_file(
         project_id=asset.project_id,
         scene_group_id=asset.scene_group_id,
         scene_id=asset.scene_id,
+        folder_id=asset.folder_id,
         stage_key=asset.stage_key,
         asset_type=asset.asset_type,
         media_type=_detect_media_type(original_name),

@@ -54,3 +54,21 @@ def test_normalize_canvas_json_scales_geometry_fields():
     assert obj["width"] == 160.0
     assert obj["height"] == 320.0
     assert obj["strokeWidth"] == 8.0
+
+
+def test_normalize_canvas_json_keeps_objects_when_meta_missing():
+    canvas_json = {
+        "objects": [
+            {
+                "type": "rect",
+                "left": 50,
+                "top": 120,
+                "width": 80,
+                "height": 160,
+            }
+        ],
+    }
+
+    normalized = _normalize_canvas_json(canvas_json, (800, 1600))
+
+    assert normalized == canvas_json

@@ -305,10 +305,15 @@ def _extract_video_frame(asset: Asset, frame_number: int | None = None, timestam
         if not cap.isOpened():
             return None
         fps = cap.get(cv2.CAP_PROP_FPS) or 0
-        if frame_number and frame_number > 0:
+        if timestamp_seconds is not None:
+            safe_timestamp = max(float(timestamp_seconds), 0.0)
+            if fps > 0:
+                target_frame = max(int(round(safe_timestamp * fps)), 0)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            else:
+                cap.set(cv2.CAP_PROP_POS_MSEC, safe_timestamp * 1000)
+        elif frame_number and frame_number > 0:
             cap.set(cv2.CAP_PROP_POS_FRAMES, max(frame_number - 1, 0))
-        elif timestamp_seconds is not None and fps > 0:
-            cap.set(cv2.CAP_PROP_POS_MSEC, max(timestamp_seconds, 0) * 1000)
         ok, frame = cap.read()
         if not ok or frame is None:
             return None

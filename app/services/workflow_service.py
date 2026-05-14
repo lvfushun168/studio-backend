@@ -222,6 +222,7 @@ def approve_stage(
     stage_key: str,
     user_id: int,
     comment: str | None = None,
+    reason_category: str | None = None,
 ) -> list[ReviewRecord]:
     stmt = select(StageProgress).where(
         StageProgress.scene_id == scene.id,
@@ -254,6 +255,7 @@ def approve_stage(
         to_status="approved",
         operator_id=user_id,
         comment=comment,
+        extra_json={"reasonCategory": reason_category} if reason_category else None,
     )
     db.add(record)
     records.append(record)
@@ -309,6 +311,7 @@ def reject_stage(
     stage_key: str,
     user_id: int,
     comment: str | None = None,
+    reason_category: str | None = None,
 ) -> list[ReviewRecord]:
     stmt = select(StageProgress).where(
         StageProgress.scene_id == scene.id,
@@ -342,6 +345,7 @@ def reject_stage(
         to_status="rejected",
         operator_id=user_id,
         comment=comment,
+        extra_json={"reasonCategory": reason_category} if reason_category else None,
     )
     db.add(record)
     records.append(record)

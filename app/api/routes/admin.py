@@ -7,7 +7,9 @@ from app.core.database import get_db
 from app.models.admin import AccountPoolAccount, AuditLog, GenerationResult, GenerationTask
 from app.models.project import Project
 from app.models.user import User
+from app.schemas.activity import ActivityEventRead
 from app.schemas.admin import AuditLogRead, DashboardRead, DashboardStatusCount, GenerationTaskRead
+from app.services.activity_service import list_admin_activity
 
 router = APIRouter()
 
@@ -54,3 +56,28 @@ def list_audit_logs(
     if user_id is not None:
         stmt = stmt.where(AuditLog.user_id == user_id)
     return list(db.scalars(stmt).all())
+
+
+@router.get("/activities", response_model=list[ActivityEventRead])
+def list_admin_activities(
+    action: str | None = None,
+    target_type: str | None = None,
+    user_id: int | None = None,
+    project_id: int | None = None,
+    scene_id: int | None = None,
+    asset_id: int | None = None,
+    limit: int = 200,
+    current_user: CurrentUser = None,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    require_role(ADMIN_ROLES)(current_user)
+    return list_admin_activity(
+        db,
+        action=action,
+        target_type=target_type,
+        user_id=user_id,
+        project_id=project_id,
+        scene_id=scene_id,
+        asset_id=asset_id,
+        limit=min(max(limit, 1), 500),
+    )

@@ -8,7 +8,10 @@ from app.core.database import get_db
 from app.models.annotation import Annotation
 from app.models.asset import Asset, AssetAttachment, AssetFolder
 from app.models.scene import Scene, StageProgress
+from app.schemas.activity import ActivityEventRead
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
+from app.services.activity_service import activity_payload, list_asset_activity
+from app.services.audit_service import record_audit
 
 router = APIRouter()
 
@@ -209,6 +212,24 @@ def create_asset(
         uploaded_by=current_user.id,
     )
     db.add(asset)
+    db.flush()
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="asset.create",
+        target_type="asset",
+        target_id=asset.id,
+        project_id=payload.project_id,
+        summary=f"创建资产记录 {payload.original_name}",
+        payload_json=activity_payload(
+            sceneId=payload.scene_id,
+            assetId=asset.id,
+            stageKey=payload.stage_key,
+            originalName=payload.original_name,
+            assetType=payload.asset_type,
+            isGlobal=payload.is_global,
+        ),
+    )
     db.commit()
     stmt = select(Asset).options(selectinload(Asset.attachments)).where(Asset.id == asset.id)
     return db.scalar(stmt)
@@ -283,6 +304,24 @@ def create_asset_reference(
         uploaded_by=current_user.id,
     )
     db.add(referenced_asset)
+    db.flush()
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="asset.reference_create",
+        target_type="asset",
+        target_id=referenced_asset.id,
+        project_id=referenced_asset.project_id,
+        summary=f"引用通用资产 {source_asset.original_name} 到当前阶段",
+        payload_json=activity_payload(
+            sceneId=referenced_asset.scene_id,
+            assetId=referenced_asset.id,
+            sourceAssetId=source_asset.id,
+            stageKey=referenced_asset.stage_key,
+            originalName=referenced_asset.original_name,
+            version=referenced_asset.version,
+        ),
+    )
     db.commit()
     stmt = select(Asset).options(selectinload(Asset.attachments)).where(Asset.id == referenced_asset.id)
     return db.scalar(stmt)
@@ -328,6 +367,25 @@ def update_asset(
             asset.folder_id = payload.folder_id
     if "metadata_json" in payload.model_fields_set:
         asset.metadata_json = payload.metadata_json
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="asset.update_meta",
+        target_type="asset",
+        target_id=asset.id,
+        project_id=asset.project_id,
+        summary=f"更新资产 {asset.original_name} 信息",
+        payload_json=activity_payload(
+            sceneId=asset.scene_id,
+            assetId=asset.id,
+            stageKey=asset.stage_key,
+            originalName=asset.original_name,
+            note=asset.note,
+            folderId=asset.folder_id,
+            isGlobal=asset.is_global,
+            metadata=asset.metadata_json,
+        ),
+    )
     db.commit()
     db.refresh(asset)
     return asset
@@ -363,6 +421,22 @@ def delete_asset(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Approved stage assets cannot be deleted",
             )
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="asset.delete",
+        target_type="asset",
+        target_id=asset.id,
+        project_id=asset.project_id,
+        summary=f"删除资产 {asset.original_name} v{asset.version}",
+        payload_json=activity_payload(
+            sceneId=asset.scene_id,
+            assetId=asset.id,
+            stageKey=asset.stage_key,
+            originalName=asset.original_name,
+            version=asset.version,
+        ),
+    )
     db.delete(asset)
     db.commit()
 
@@ -400,6 +474,36 @@ def create_asset_attachment_meta(
         uploaded_by=current_user.id,
     )
     db.add(attachment)
+    db.flush()
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="asset.attachment_add",
+        target_type="asset_attachment",
+        target_id=attachment.id,
+        project_id=asset.project_id,
+        summary=f"为资产 {asset.original_name} 添加附件 {payload.filename}",
+        payload_json=activity_payload(
+            sceneId=asset.scene_id,
+            assetId=asset.id,
+            stageKey=asset.stage_key,
+            originalName=asset.original_name,
+            attachmentName=payload.filename,
+        ),
+    )
     db.commit()
     db.refresh(attachment)
     return {"attachment_id": attachment.id, "asset_id": asset_id, "filename": attachment.filename}
+
+
+@router.get("/{asset_id}/activity", response_model=list[ActivityEventRead])
+def get_asset_activity(
+    asset_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    require_project_access(asset.project_id, current_user, db)
+    return list_asset_activity(db, asset_id)

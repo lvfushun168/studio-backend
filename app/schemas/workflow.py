@@ -27,11 +27,13 @@ class SubmitRequest(BaseModel):
 class ApproveRequest(BaseModel):
     stage_key: str
     comment: str | None = None
+    reason_category: str | None = None
 
 
 class RejectRequest(BaseModel):
     stage_key: str
     comment: str | None = None
+    reason_category: str | None = None
 
 
 class ResubmitRequest(BaseModel):

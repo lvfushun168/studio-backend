@@ -8,6 +8,8 @@ from app.core.database import get_db
 from app.models.annotation import Annotation, AnnotationAttachment
 from app.models.asset import Asset
 from app.schemas.annotation import AnnotationCreate, AnnotationRead, AnnotationUpdate
+from app.services.activity_service import activity_payload
+from app.services.audit_service import record_audit
 from app.services.media_service import generate_annotation_artifacts
 
 router = APIRouter()
@@ -77,6 +79,24 @@ def create_annotation(
     annotation.overlay_url = payload.overlay_url or generated["overlay_url"]
     annotation.merged_path = generated["merged_path"]
     annotation.merged_url = payload.merged_url or generated["merged_url"]
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="annotation.create",
+        target_type="annotation",
+        target_id=annotation.id,
+        project_id=annotation.project_id,
+        summary=f"为资产 {asset.original_name} 添加批注",
+        payload_json=activity_payload(
+            sceneId=asset.scene_id,
+            assetId=asset.id,
+            annotationId=annotation.id,
+            stageKey=asset.stage_key,
+            originalName=asset.original_name,
+            frameNumber=annotation.frame_number,
+            summary=annotation.summary,
+        ),
+    )
     db.commit()
     stmt = select(Annotation).options(selectinload(Annotation.attachments)).where(Annotation.id == annotation.id)
     return db.scalar(stmt)
@@ -130,6 +150,24 @@ def update_annotation(
         annotation.merged_path = generated["merged_path"]
         if payload.merged_url is None:
             annotation.merged_url = generated["merged_url"]
+    asset = db.get(Asset, annotation.target_asset_id)
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="annotation.update",
+        target_type="annotation",
+        target_id=annotation.id,
+        project_id=annotation.project_id,
+        summary="更新批注",
+        payload_json=activity_payload(
+            sceneId=asset.scene_id if asset else None,
+            assetId=annotation.target_asset_id,
+            annotationId=annotation.id,
+            stageKey=asset.stage_key if asset else None,
+            frameNumber=annotation.frame_number,
+            summary=annotation.summary,
+        ),
+    )
 
     db.commit()
     stmt = select(Annotation).options(selectinload(Annotation.attachments)).where(Annotation.id == annotation_id)
@@ -148,6 +186,24 @@ def delete_annotation(
     require_project_access(annotation.project_id, current_user, db)
     if annotation.author_id != current_user.id and current_user.role not in ("admin", "director"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete others' annotations")
+    asset = db.get(Asset, annotation.target_asset_id)
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="annotation.delete",
+        target_type="annotation",
+        target_id=annotation.id,
+        project_id=annotation.project_id,
+        summary="删除批注",
+        payload_json=activity_payload(
+            sceneId=asset.scene_id if asset else None,
+            assetId=annotation.target_asset_id,
+            annotationId=annotation.id,
+            stageKey=asset.stage_key if asset else None,
+            frameNumber=annotation.frame_number,
+            summary=annotation.summary,
+        ),
+    )
     db.delete(annotation)
     db.commit()
 
@@ -180,6 +236,24 @@ def create_annotation_attachment_meta(
         uploaded_by=current_user.id,
     )
     db.add(attachment)
+    db.flush()
+    asset = db.get(Asset, annotation.target_asset_id)
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="annotation.attachment_add",
+        target_type="annotation_attachment",
+        target_id=attachment.id,
+        project_id=annotation.project_id,
+        summary=f"为批注添加附件 {payload.filename}",
+        payload_json=activity_payload(
+            sceneId=asset.scene_id if asset else None,
+            assetId=annotation.target_asset_id,
+            annotationId=annotation.id,
+            stageKey=asset.stage_key if asset else None,
+            attachmentName=payload.filename,
+        ),
+    )
     db.commit()
     db.refresh(attachment)
     return {"attachment_id": attachment.id, "annotation_id": annotation_id, "filename": attachment.filename}

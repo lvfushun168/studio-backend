@@ -49,7 +49,7 @@ def approve_scene(
     require_project_access(scene.project_id, current_user, db)
 
     records = workflow_service.approve_stage(
-        db, scene, payload.stage_key, current_user.id, payload.comment
+        db, scene, payload.stage_key, current_user.id, payload.comment, payload.reason_category
     )
     return records
 
@@ -68,7 +68,7 @@ def reject_scene(
     require_project_access(scene.project_id, current_user, db)
 
     records = workflow_service.reject_stage(
-        db, scene, payload.stage_key, current_user.id, payload.comment
+        db, scene, payload.stage_key, current_user.id, payload.comment, payload.reason_category
     )
     return records
 

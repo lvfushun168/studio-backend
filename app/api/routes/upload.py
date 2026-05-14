@@ -11,6 +11,8 @@ from app.core.database import get_db
 from app.models.annotation import Annotation, AnnotationAttachment
 from app.models.asset import Asset, AssetAttachment
 from app.models.project import Project
+from app.services.activity_service import activity_payload
+from app.services.audit_service import record_audit
 from app.services.media_service import extract_image_metadata, extract_video_metadata, generate_video_thumbnail
 
 router = APIRouter()
@@ -112,6 +114,7 @@ def upload_asset_file(
 
     # If this is the first upload or original_name changed, update existing asset
     if not asset.storage_path or asset.original_name != original_name:
+        previous_version = asset.version
         asset.filename = file.filename or asset.filename
         asset.original_name = original_name
         asset.storage_path = storage_path
@@ -131,6 +134,24 @@ def upload_asset_file(
             asset.thumbnail_url = thumbnail["thumbnail_url"]
         elif asset.media_type == "image":
             asset.metadata_json = extract_image_metadata(asset)
+        record_audit(
+            db,
+            user_id=current_user.id,
+            action="asset.upload_initial",
+            target_type="asset",
+            target_id=asset.id,
+            project_id=asset.project_id,
+            summary=f"上传资产 {asset.original_name} v{asset.version}",
+            payload_json=activity_payload(
+                sceneId=asset.scene_id,
+                assetId=asset.id,
+                stageKey=asset.stage_key,
+                originalName=asset.original_name,
+                version=asset.version,
+                previousVersion=previous_version,
+                mediaType=asset.media_type,
+            ),
+        )
         db.commit()
         db.refresh(asset)
         return {
@@ -177,6 +198,24 @@ def upload_asset_file(
         new_asset.thumbnail_url = thumbnail["thumbnail_url"]
     elif new_asset.media_type == "image":
         new_asset.metadata_json = extract_image_metadata(new_asset)
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="asset.version_create",
+        target_type="asset",
+        target_id=new_asset.id,
+        project_id=new_asset.project_id,
+        summary=f"上传新版本 {new_asset.original_name} v{new_asset.version}",
+        payload_json=activity_payload(
+            sceneId=new_asset.scene_id,
+            assetId=new_asset.id,
+            stageKey=new_asset.stage_key,
+            originalName=new_asset.original_name,
+            version=new_asset.version,
+            previousVersion=asset.version,
+            mediaType=new_asset.media_type,
+        ),
+    )
     db.commit()
     db.refresh(new_asset)
     return {
@@ -217,6 +256,23 @@ def upload_asset_attachment(
         uploaded_by=current_user.id,
     )
     db.add(attachment)
+    db.flush()
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="asset.attachment_add",
+        target_type="asset_attachment",
+        target_id=attachment.id,
+        project_id=asset.project_id,
+        summary=f"上传资产附件 {attachment.filename}",
+        payload_json=activity_payload(
+            sceneId=asset.scene_id,
+            assetId=asset.id,
+            stageKey=asset.stage_key,
+            originalName=asset.original_name,
+            attachmentName=attachment.filename,
+        ),
+    )
     db.commit()
     db.refresh(attachment)
     return {"attachment_id": attachment.id, "storage_path": storage_path, "public_url": public_url}

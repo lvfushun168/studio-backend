@@ -19,6 +19,7 @@ from app.models.project import SceneAssignment, SceneGroup
 from app.models.asset import Asset
 from app.models.scene import Scene, StageProgress
 from app.models.workflow import ReviewRecord
+from app.schemas.activity import ActivityEventRead
 from app.schemas.scene import (
     SceneAssignmentRead,
     SceneBatchSortRequest,
@@ -27,6 +28,8 @@ from app.schemas.scene import (
     SceneUpdate,
     StageProgressRead,
 )
+from app.services.activity_service import activity_payload, list_scene_activity
+from app.services.audit_service import record_audit
 
 router = APIRouter()
 
@@ -166,6 +169,23 @@ def create_scene(
     for item in build_default_stage_progress(db, payload.stage_template, payload.project_id, scene.id):
         db.add(StageProgress(**item))
 
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="scene.create",
+        target_type="scene",
+        target_id=scene.id,
+        project_id=scene.project_id,
+        summary=f"创建镜头 {scene.name}",
+        payload_json=activity_payload(
+            sceneId=scene.id,
+            sceneName=scene.name,
+            stageTemplate=scene.stage_template,
+            sceneGroupId=scene.scene_group_id,
+            durationSeconds=float(scene.duration_seconds) if scene.duration_seconds is not None else None,
+        ),
+    )
+
     db.commit()
     db.refresh(scene)
 
@@ -189,7 +209,23 @@ def batch_update_scene_sort(
         scene = db.get(Scene, item.scene_id)
         if scene:
             require_project_access(scene.project_id, current_user, db)
+            previous_sort = scene.sort_order
             scene.sort_order = item.sort_order
+            record_audit(
+                db,
+                user_id=current_user.id,
+                action="scene.sort_update",
+                target_type="scene",
+                target_id=scene.id,
+                project_id=scene.project_id,
+                summary=f"调整镜头 {scene.name} 顺序为 {item.sort_order}",
+                payload_json=activity_payload(
+                    sceneId=scene.id,
+                    sceneName=scene.name,
+                    fromSortOrder=previous_sort,
+                    toSortOrder=item.sort_order,
+                ),
+            )
     db.commit()
 
 
@@ -223,6 +259,16 @@ def update_scene(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
     require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
+    before = {
+        "sceneGroupId": scene.scene_group_id,
+        "name": scene.name,
+        "description": scene.description,
+        "level": scene.level,
+        "frameCount": scene.frame_count,
+        "durationSeconds": float(scene.duration_seconds) if scene.duration_seconds is not None else None,
+        "sortOrder": scene.sort_order,
+        "baseSceneId": scene.base_scene_id,
+    }
     if payload.scene_group_id is not None:
         scene.scene_group_id = payload.scene_group_id
     if payload.name is not None:
@@ -239,6 +285,32 @@ def update_scene(
         scene.sort_order = payload.sort_order
     if payload.base_scene_id is not None:
         scene.base_scene_id = payload.base_scene_id
+    after = {
+        "sceneGroupId": scene.scene_group_id,
+        "name": scene.name,
+        "description": scene.description,
+        "level": scene.level,
+        "frameCount": scene.frame_count,
+        "durationSeconds": float(scene.duration_seconds) if scene.duration_seconds is not None else None,
+        "sortOrder": scene.sort_order,
+        "baseSceneId": scene.base_scene_id,
+    }
+    changed_fields = {key: {"before": before[key], "after": after[key]} for key in after if before.get(key) != after.get(key)}
+    if changed_fields:
+        record_audit(
+            db,
+            user_id=current_user.id,
+            action="scene.update",
+            target_type="scene",
+            target_id=scene.id,
+            project_id=scene.project_id,
+            summary=f"更新镜头 {scene.name}",
+            payload_json=activity_payload(
+                sceneId=scene.id,
+                sceneName=scene.name,
+                changes=changed_fields,
+            ),
+        )
     db.commit()
     db.refresh(scene)
 
@@ -269,6 +341,16 @@ def delete_scene(
             status_code=status.HTTP_409_CONFLICT,
             detail="Scene with review history cannot be deleted",
         )
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="scene.delete",
+        target_type="scene",
+        target_id=scene.id,
+        project_id=scene.project_id,
+        summary=f"删除镜头 {scene.name}",
+        payload_json=activity_payload(sceneId=scene.id, sceneName=scene.name),
+    )
     db.delete(scene)
     db.commit()
 
@@ -304,6 +386,21 @@ def create_scene_assignment(
     require_project_access(scene.project_id, current_user, db)
     assignment = SceneAssignment(scene_id=scene_id, user_id=user_id, stage_key=stage_key)
     db.add(assignment)
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="scene.assignment_add",
+        target_type="scene",
+        target_id=scene.id,
+        project_id=scene.project_id,
+        summary=f"为镜头 {scene.name} 分配负责人 {user_id}",
+        payload_json=activity_payload(
+            sceneId=scene.id,
+            sceneName=scene.name,
+            assignedUserId=user_id,
+            stageKey=stage_key,
+        ),
+    )
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -323,6 +420,20 @@ def delete_scene_assignment(
     assignment = db.get(SceneAssignment, assignment_id)
     if not assignment or assignment.scene_id != scene_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="scene.assignment_remove",
+        target_type="scene",
+        target_id=scene_id,
+        project_id=scene.project_id if scene else None,
+        summary=f"移除镜头负责人 {assignment.user_id}",
+        payload_json=activity_payload(
+            sceneId=scene_id,
+            assignedUserId=assignment.user_id,
+            stageKey=assignment.stage_key,
+        ),
+    )
     db.delete(assignment)
     db.commit()
 
@@ -359,6 +470,22 @@ def accept_stage(
 
     sp.status = "in_progress"
     sp.started_at = datetime.now(timezone.utc)
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="stage.accept",
+        target_type="scene",
+        target_id=scene.id,
+        project_id=scene.project_id,
+        summary=f"{scene.name} 的 {_stage_key_label(stage_key)} 已开始制作",
+        payload_json=activity_payload(
+            sceneId=scene.id,
+            sceneName=scene.name,
+            stageKey=stage_key,
+            fromStatus="pending",
+            toStatus="in_progress",
+        ),
+    )
     db.commit()
     db.refresh(sp)
     return {"scene_id": scene_id, "stage_key": stage_key, "status": sp.status}
@@ -421,6 +548,24 @@ def rollback_stage(
         prev_sp.approved_at = None
         db.add(prev_sp)
 
+    record_audit(
+        db,
+        user_id=current_user.id,
+        action="stage.rollback",
+        target_type="scene",
+        target_id=scene.id,
+        project_id=scene.project_id,
+        summary=f"{scene.name} 的 {_stage_key_label(stage_key)} 被回退到 {_stage_key_label(prev_key)}",
+        payload_json=activity_payload(
+            sceneId=scene.id,
+            sceneName=scene.name,
+            stageKey=stage_key,
+            previousStageKey=prev_key,
+            fromStatus=sp.status,
+            toStatus="locked",
+        ),
+    )
+
     db.commit()
     return {
         "scene_id": scene_id,
@@ -429,3 +574,36 @@ def rollback_stage(
         "previous_stage": prev_key,
         "previous_status": "in_progress",
     }
+
+
+@router.get("/{scene_id}/activity", response_model=list[ActivityEventRead])
+def get_scene_activity(
+    scene_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    scene = db.get(Scene, scene_id)
+    if not scene:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_project_access(scene.project_id, current_user, db)
+    return list_scene_activity(db, scene_id)
+
+
+def _stage_key_label(stage_key: str) -> str:
+    mapping = {
+        "storyboard": "分镜",
+        "layout_character": "Layout(人)",
+        "layout_background": "Layout(背)",
+        "keyframe": "一原",
+        "keyframe_review": "一原作监",
+        "ai_draw": "AI抽卡",
+        "second_keyframe": "二原",
+        "second_review": "二原作监",
+        "inbetween": "中割",
+        "correction": "修正",
+        "coloring": "上色",
+        "compositing": "合成",
+        "final": "完成",
+        "reference": "参考",
+    }
+    return mapping.get(stage_key, stage_key)

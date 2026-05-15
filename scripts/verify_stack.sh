@@ -18,7 +18,7 @@ cd "$ROOT_DIR"
 "$VENV_ALEMBIC" upgrade head
 
 echo "[2/4] Seeding demo data"
-"$VENV_PYTHON" scripts/seed_data.py
+STUDIO_ALLOW_DESTRUCTIVE_SEED=true "$VENV_PYTHON" scripts/seed_data.py
 
 echo "[3/4] Running API regression tests"
 "$ROOT_DIR/.venv/bin/pytest" -q

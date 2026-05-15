@@ -44,7 +44,7 @@ def test_database_url() -> str:
     subprocess.run(
         [str(ROOT_DIR / ".venv" / "bin" / "python"), "scripts/seed_data.py"],
         cwd=ROOT_DIR,
-        env=env,
+        env={**env, "STUDIO_ALLOW_DESTRUCTIVE_SEED": "true"},
         check=True,
     )
 

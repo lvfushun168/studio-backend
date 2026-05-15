@@ -2,6 +2,7 @@
 """Seed minimal demo data for frontend integration testing."""
 
 from datetime import datetime
+import os
 
 from pathlib import Path
 import sys
@@ -38,6 +39,8 @@ from app.models.project import Episode, Project, SceneAssignment, SceneGroup, Us
 from app.models.reference import Reference
 from app.models.scene import Scene, StageProgress
 from app.models.user import User
+
+DESTRUCTIVE_CONFIRM_ENV = "STUDIO_ALLOW_DESTRUCTIVE_SEED"
 
 
 def ensure_demo_media_files() -> dict[str, str]:
@@ -145,7 +148,18 @@ def clear_tables(db) -> None:
     db.commit()
 
 
+def ensure_destructive_seed_confirmation() -> None:
+    confirm = os.environ.get(DESTRUCTIVE_CONFIRM_ENV, "").strip().lower()
+    if confirm in {"1", "true", "yes", "y", "reset-demo-data"}:
+        return
+    raise SystemExit(
+        "Refusing to truncate existing data. "
+        f"Set {DESTRUCTIVE_CONFIRM_ENV}=true explicitly if you really want to reset and reseed this database."
+    )
+
+
 def seed() -> None:
+    ensure_destructive_seed_confirmation()
     db = SessionLocal()
 
     try:

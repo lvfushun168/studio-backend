@@ -23,9 +23,22 @@ def get_current_user_me(current_user: CurrentUser) -> User:
 def list_users(
     project_id: int | None = None,
     role: str | None = None,
+    assignable_for_project: bool = False,
     current_user: CurrentUser = None,
     db: Session = Depends(get_db),
 ) -> list[User]:
+    if assignable_for_project:
+        require_role({"admin", "producer"})(current_user)
+        stmt = (
+            select(User)
+            .options(selectinload(User.memberships))
+            .where(User.is_active == True, User.role != "admin")
+            .order_by(User.role, User.id)
+        )
+        if role is not None:
+            stmt = stmt.where(User.role == role)
+        return list(db.scalars(stmt).all())
+
     if project_id is None:
         require_role(ADMIN_ROLES)(current_user)
 

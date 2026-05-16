@@ -6,14 +6,14 @@ from typing import Annotated
 
 from fastapi import Cookie, Depends, Header, HTTPException, status
 from fastapi.security import APIKeyHeader
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import hash_session_token
 from app.models.admin import AuthSession
-from app.models.project import UserProjectMembership
+from app.models.project import Project, UserProjectMembership
 from app.models.user import User
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -116,6 +116,7 @@ PRODUCER_ROLES = {"admin", "producer"}
 DIRECTOR_PRODUCER_ROLES = {"admin", "director", "producer"}
 ARTIST_ROLES = {"admin", "director", "producer", "artist"}
 ALL_ROLES = {"admin", "director", "producer", "artist", "visitor"}
+PROJECT_VISIBILITY_VALUES = {"private", "public"}
 
 
 def require_role(allowed_roles: set[str]):
@@ -166,6 +167,10 @@ def require_project_access(project_id: int, user: CurrentUser, db: Session) -> N
     """Basic project access check (any member or admin)."""
     if user.role == "admin":
         return
+    if user.role == "producer":
+        project = db.get(Project, project_id)
+        if project and project.visibility == "public":
+            return
     stmt = select(UserProjectMembership).where(
         UserProjectMembership.user_id == user.id,
         UserProjectMembership.project_id == project_id,
@@ -192,7 +197,27 @@ def get_accessible_project_ids(user: User, db: Session) -> list[int]:
     if user.role == "admin":
         return []
 
-    stmt = select(UserProjectMembership.project_id).where(
-        UserProjectMembership.user_id == user.id,
-    )
+    conditions = [
+        Project.id.in_(
+            select(UserProjectMembership.project_id).where(
+                UserProjectMembership.user_id == user.id,
+            )
+        )
+    ]
+    if user.role == "producer":
+        conditions.append(Project.visibility == "public")
+
+    stmt = select(Project.id).where(or_(*conditions)).order_by(Project.id)
     return list(db.scalars(stmt).all())
+
+
+def require_project_settings_access(project: Project | None, user: CurrentUser) -> None:
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if user.role == "admin":
+        return
+    if project.created_by != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the project creator can manage project settings",
+        )

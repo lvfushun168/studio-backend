@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.auth import (
     CurrentUser,
+    PRODUCER_ROLES,
+    PROJECT_VISIBILITY_VALUES,
     require_project_access,
-    DIRECTOR_PRODUCER_ROLES,
+    require_project_settings_access,
     require_role,
 )
 from app.core.database import get_db
@@ -27,13 +29,13 @@ def list_projects(
         stmt = select(Project).options(selectinload(Project.memberships)).order_by(Project.id.desc())
         return list(db.scalars(stmt).all())
 
-    stmt = (
-        select(Project)
-        .options(selectinload(Project.memberships))
-        .join(UserProjectMembership, UserProjectMembership.project_id == Project.id)
-        .where(UserProjectMembership.user_id == current_user.id)
-        .order_by(Project.id.desc())
-    )
+    membership_subquery = select(UserProjectMembership.project_id).where(UserProjectMembership.user_id == current_user.id)
+    stmt = select(Project).options(selectinload(Project.memberships))
+    if current_user.role == "producer":
+        stmt = stmt.where(or_(Project.id.in_(membership_subquery), Project.visibility == "public"))
+    else:
+        stmt = stmt.where(Project.id.in_(membership_subquery))
+    stmt = stmt.order_by(Project.id.desc())
     return list(db.scalars(stmt).all())
 
 
@@ -43,12 +45,16 @@ def create_project(
     current_user: CurrentUser,
     db: Session = Depends(get_db),
 ) -> Project:
-    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
+    require_role(PRODUCER_ROLES)(current_user)
+    visibility = (payload.visibility or "private").lower()
+    if visibility not in PROJECT_VISIBILITY_VALUES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid project visibility")
     project = Project(
         name=payload.name,
         description=payload.description,
         project_type=payload.project_type,
         status=payload.status,
+        visibility=visibility,
         deadline_at=payload.deadline_at,
         created_by=current_user.id,
     )
@@ -106,10 +112,8 @@ def update_project(
     db: Session = Depends(get_db),
 ) -> Project:
     require_project_access(project_id, current_user, db)
-    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    require_project_settings_access(project, current_user)
     if payload.name is not None:
         project.name = payload.name
     if payload.description is not None:
@@ -118,6 +122,11 @@ def update_project(
         project.project_type = payload.project_type
     if payload.status is not None:
         project.status = payload.status
+    if payload.visibility is not None:
+        visibility = payload.visibility.lower()
+        if visibility not in PROJECT_VISIBILITY_VALUES:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid project visibility")
+        project.visibility = visibility
     if payload.deadline_at is not None:
         project.deadline_at = payload.deadline_at
     if payload.member_ids is not None:
@@ -150,10 +159,8 @@ def delete_project(
     db: Session = Depends(get_db),
 ) -> None:
     require_project_access(project_id, current_user, db)
-    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    require_project_settings_access(project, current_user)
     has_audit_history = db.scalar(select(AuditLog.id).where(AuditLog.project_id == project_id).limit(1))
     if has_audit_history:
         raise HTTPException(
@@ -193,11 +200,9 @@ def add_project_member(
     db: Session = Depends(get_db),
 ) -> Project:
     require_project_access(project_id, current_user, db)
-    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     stmt = select(Project).options(selectinload(Project.memberships)).where(Project.id == project_id)
     project = db.scalar(stmt)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    require_project_settings_access(project, current_user)
     duplicate = next((m for m in project.memberships if m.user_id == payload.user_id), None)
     if duplicate:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Member already exists")
@@ -230,11 +235,9 @@ def update_project_member(
     db: Session = Depends(get_db),
 ) -> Project:
     require_project_access(project_id, current_user, db)
-    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     stmt = select(Project).options(selectinload(Project.memberships)).where(Project.id == project_id)
     project = db.scalar(stmt)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    require_project_settings_access(project, current_user)
     membership = next((m for m in project.memberships if m.user_id == user_id), None)
     if not membership:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")
@@ -260,11 +263,9 @@ def remove_project_member(
     db: Session = Depends(get_db),
 ) -> Project:
     require_project_access(project_id, current_user, db)
-    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
     stmt = select(Project).options(selectinload(Project.memberships)).where(Project.id == project_id)
     project = db.scalar(stmt)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    require_project_settings_access(project, current_user)
     membership = next((m for m in project.memberships if m.user_id == user_id), None)
     if not membership:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")

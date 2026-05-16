@@ -17,6 +17,7 @@ class Project(TimestampMixin, Base):
     cover_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_type: Mapped[str] = mapped_column(String(32), default="series", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False, index=True)
+    visibility: Mapped[str] = mapped_column(String(32), default="private", nullable=False, index=True)
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 

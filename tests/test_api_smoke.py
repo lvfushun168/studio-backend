@@ -140,6 +140,116 @@ def test_project_creator_is_added_to_membership(client: TestClient) -> None:
     assert list_response.status_code == 200
     visible_project_ids = [item["id"] for item in list_response.json()]
     assert project_id in visible_project_ids
+    assert create_response.json()["visibility"] == "private"
+
+
+def test_director_cannot_create_project(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/projects",
+        headers={"X-User-ID": "2"},
+        json={
+            "name": "导演不可创建",
+            "description": "smoke",
+            "project_type": "single",
+            "status": "active",
+        },
+    )
+    assert response.status_code == 403
+
+
+def test_private_project_is_hidden_from_other_producers(client: TestClient) -> None:
+    admin_headers = {"X-User-ID": "1"}
+    create_user_response = client.post(
+        "/api/v1/users",
+        headers=admin_headers,
+        json={
+            "username": "producer2",
+            "display_name": "制片人小李",
+            "email": "producer2@example.com",
+            "role": "producer",
+            "password": "producer234",
+            "is_active": True,
+        },
+    )
+    assert create_user_response.status_code == 201
+    producer2_id = create_user_response.json()["id"]
+
+    create_response = client.post(
+        "/api/v1/projects",
+        headers={"X-User-ID": "4"},
+        json={
+            "name": "私人项目",
+            "description": "smoke",
+            "project_type": "single",
+            "status": "active",
+            "visibility": "private",
+        },
+    )
+    assert create_response.status_code == 201
+    project_id = create_response.json()["id"]
+
+    producer2_projects = client.get("/api/v1/projects", headers={"X-User-ID": str(producer2_id)})
+    assert producer2_projects.status_code == 200
+    assert all(item["id"] != project_id for item in producer2_projects.json())
+
+    forbidden_detail = client.get(f"/api/v1/projects/{project_id}", headers={"X-User-ID": str(producer2_id)})
+    assert forbidden_detail.status_code == 403
+
+
+def test_public_project_is_visible_to_other_producers_but_only_creator_can_edit(client: TestClient) -> None:
+    admin_headers = {"X-User-ID": "1"}
+    create_user_response = client.post(
+        "/api/v1/users",
+        headers=admin_headers,
+        json={
+            "username": "producer3",
+            "display_name": "制片人小周",
+            "email": "producer3@example.com",
+            "role": "producer",
+            "password": "producer345",
+            "is_active": True,
+        },
+    )
+    assert create_user_response.status_code == 201
+    producer3_id = create_user_response.json()["id"]
+
+    create_response = client.post(
+        "/api/v1/projects",
+        headers={"X-User-ID": "4"},
+        json={
+            "name": "公共项目",
+            "description": "smoke",
+            "project_type": "single",
+            "status": "active",
+            "visibility": "public",
+        },
+    )
+    assert create_response.status_code == 201
+    project_id = create_response.json()["id"]
+
+    producer3_projects = client.get("/api/v1/projects", headers={"X-User-ID": str(producer3_id)})
+    assert producer3_projects.status_code == 200
+    assert any(item["id"] == project_id for item in producer3_projects.json())
+
+    visible_detail = client.get(f"/api/v1/projects/{project_id}", headers={"X-User-ID": str(producer3_id)})
+    assert visible_detail.status_code == 200
+    assert visible_detail.json()["visibility"] == "public"
+
+    forbidden_update = client.put(
+        f"/api/v1/projects/{project_id}",
+        headers={"X-User-ID": str(producer3_id)},
+        json={"name": "越权改名"},
+    )
+    assert forbidden_update.status_code == 403
+    assert forbidden_update.json()["detail"] == "Only the project creator can manage project settings"
+
+
+def test_producer_can_list_assignable_users(client: TestClient) -> None:
+    response = client.get("/api/v1/users", headers={"X-User-ID": "4"}, params={"assignable_for_project": True})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    assert all(item["role"] != "admin" for item in payload)
 
 
 def test_project_with_audit_history_cannot_be_hard_deleted(client: TestClient) -> None:

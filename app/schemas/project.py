@@ -10,6 +10,7 @@ class ProjectCreate(CamelCaseModel):
     description: str | None = None
     project_type: str = "series"
     status: str = "active"
+    visibility: str = "private"
     deadline_at: datetime | None = None
     member_ids: list[int] = []
 
@@ -19,6 +20,7 @@ class ProjectUpdate(CamelCaseModel):
     description: str | None = None
     project_type: str | None = None
     status: str | None = None
+    visibility: str | None = None
     deadline_at: datetime | None = None
     member_ids: list[int] | None = None
 
@@ -41,6 +43,7 @@ class ProjectRead(CamelCaseORMModel):
     cover_url: str | None = None
     project_type: str = Field(serialization_alias="type")
     status: str
+    visibility: str
     deadline_at: datetime | None
     created_by: int | None
     members: list[ProjectMemberRead] = []

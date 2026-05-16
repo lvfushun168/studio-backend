@@ -39,6 +39,7 @@ from app.models.project import Episode, Project, SceneAssignment, SceneGroup, Us
 from app.models.reference import Reference
 from app.models.scene import Scene, StageProgress
 from app.models.user import User
+from app.models.workflow import WorkflowTemplate
 
 DESTRUCTIVE_CONFIRM_ENV = "STUDIO_ALLOW_DESTRUCTIVE_SEED"
 
@@ -131,6 +132,7 @@ def clear_tables(db) -> None:
         "bank_references",
         "bank_materials",
         "review_records",
+        "workflow_templates",
         "stage_progresses",
         "scene_assignments",
         "scenes",
@@ -222,6 +224,48 @@ def seed() -> None:
         db.add_all(groups)
         db.flush()
         g1, g2, g3 = groups
+
+        workflow_templates = [
+            WorkflowTemplate(
+                scope="global",
+                project_id=None,
+                name="小作坊通用单帧流程",
+                description="适合立绘、单帧和轻量修图需求的通用模板。",
+                based_on_template_key="ai_single_frame",
+                is_default=True,
+                is_active=True,
+                steps_json=[
+                    {"key": "storyboard", "label": "分镜", "needs_review": True, "sub_track": None},
+                    {"key": "ai_draw", "label": "AI抽卡", "needs_review": True, "sub_track": None},
+                    {"key": "correction", "label": "修正", "needs_review": True, "sub_track": None},
+                    {"key": "final", "label": "成稿", "needs_review": True, "sub_track": None},
+                ],
+                created_by=user_map["producer1"],
+            ),
+            WorkflowTemplate(
+                scope="global",
+                project_id=None,
+                name="小作坊通用动画流程",
+                description="适合大多数常规动画项目的通用流程模板。",
+                based_on_template_key="standard",
+                is_default=False,
+                is_active=True,
+                steps_json=[
+                    {"key": "storyboard", "label": "分镜", "needs_review": True, "sub_track": None},
+                    {"key": "layout_character", "label": "Layout(人)", "needs_review": True, "sub_track": "character"},
+                    {"key": "layout_background", "label": "Layout(背)", "needs_review": True, "sub_track": "background"},
+                    {"key": "keyframe", "label": "一原", "needs_review": True, "sub_track": None},
+                    {"key": "second_keyframe", "label": "二原", "needs_review": True, "sub_track": None},
+                    {"key": "inbetween", "label": "中割", "needs_review": True, "sub_track": None},
+                    {"key": "coloring", "label": "上色", "needs_review": True, "sub_track": None},
+                    {"key": "compositing", "label": "合成", "needs_review": True, "sub_track": None},
+                    {"key": "final", "label": "完成", "needs_review": True, "sub_track": None},
+                ],
+                created_by=user_map["producer1"],
+            ),
+        ]
+        db.add_all(workflow_templates)
+        db.flush()
 
         # 6. Scenes
         scenes_data = [

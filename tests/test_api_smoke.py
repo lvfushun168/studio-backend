@@ -494,6 +494,142 @@ def test_project_workflow_template_can_drive_scene_flow_and_freeze_structure(cli
     assert delete_response.status_code == 409
 
 
+def test_global_workflow_template_can_seed_new_project_templates(client: TestClient) -> None:
+    producer_headers = {"X-User-ID": "4"}
+    director_headers = {"X-User-ID": "2"}
+
+    global_template_response = client.post(
+        "/api/v1/workflow-templates",
+        headers=producer_headers,
+        json={
+            "scope": "global",
+            "name": "通用双段流程",
+            "description": "给小项目快速复用的模板",
+            "is_default": True,
+            "steps": [
+                {"key": "storyboard", "label": "分镜", "needs_review": True},
+                {"key": "final", "label": "完成", "needs_review": True},
+            ],
+        },
+    )
+    assert global_template_response.status_code == 201
+    global_template_payload = global_template_response.json()
+    assert global_template_payload["scope"] == "global"
+    assert global_template_payload["projectId"] is None
+    assert global_template_payload["templateKey"].startswith("global_template:")
+
+    list_global_response = client.get(
+        "/api/v1/workflow-templates",
+        headers=producer_headers,
+        params={"scope": "global"},
+    )
+    assert list_global_response.status_code == 200
+    assert any(item["id"] == global_template_payload["id"] for item in list_global_response.json())
+
+    create_project_response = client.post(
+        "/api/v1/projects",
+        headers=producer_headers,
+        json={
+            "name": "通用模板导入项目",
+            "description": "验证全局模板复制",
+            "project_type": "single",
+            "status": "active",
+            "member_ids": [2],
+            "workflow_template_source_keys": [global_template_payload["templateKey"]],
+        },
+    )
+    assert create_project_response.status_code == 201
+    project_id = create_project_response.json()["id"]
+
+    project_templates_response = client.get(
+        "/api/v1/workflow-templates",
+        headers=producer_headers,
+        params={"project_id": project_id},
+    )
+    assert project_templates_response.status_code == 200
+    project_templates = project_templates_response.json()
+    imported_template = next(item for item in project_templates if item["name"] == "通用双段流程")
+    assert imported_template["scope"] == "project"
+    assert imported_template["basedOnTemplateKey"] == global_template_payload["templateKey"]
+    assert imported_template["isDefault"] is True
+
+    scene_group_response = client.post(
+        "/api/v1/scene-groups",
+        headers=producer_headers,
+        json={
+            "project_id": project_id,
+            "name": "导入模板镜头组",
+        },
+    )
+    assert scene_group_response.status_code == 201
+
+    scene_response = client.post(
+        "/api/v1/scenes",
+        headers=director_headers,
+        json={
+            "project_id": project_id,
+            "scene_group_id": scene_group_response.json()["id"],
+            "name": "GLOBAL_TEMPLATE_SCENE",
+            "level": "B",
+            "stage_template": imported_template["templateKey"],
+            "pipeline": imported_template["templateKey"],
+        },
+    )
+    assert scene_response.status_code == 201
+    scene_payload = scene_response.json()
+    assert list(scene_payload["stageProgress"].keys()) == ["storyboard", "final"]
+
+
+def test_scene_can_use_global_template_and_auto_materialize_project_copy(client: TestClient) -> None:
+    producer_headers = {"X-User-ID": "4"}
+    director_headers = {"X-User-ID": "2"}
+
+    global_template_response = client.post(
+        "/api/v1/workflow-templates",
+        headers=producer_headers,
+        json={
+            "scope": "global",
+            "name": "导演直接选用的通用模板",
+            "description": "验证镜头创建时自动落成项目模板",
+            "steps": [
+                {"key": "storyboard", "label": "分镜", "needs_review": True},
+                {"key": "final", "label": "完成", "needs_review": True},
+            ],
+        },
+    )
+    assert global_template_response.status_code == 201
+    global_template_key = global_template_response.json()["templateKey"]
+
+    scene_response = client.post(
+        "/api/v1/scenes",
+        headers=director_headers,
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "name": "GLOBAL_DIRECT_SCENE",
+            "level": "B",
+            "stage_template": global_template_key,
+            "pipeline": global_template_key,
+        },
+    )
+    assert scene_response.status_code == 201
+    scene_payload = scene_response.json()
+    assert scene_payload["stageTemplate"].startswith("project_template:")
+    assert scene_payload["pipeline"].startswith("project_template:")
+    assert list(scene_payload["stageProgress"].keys()) == ["storyboard", "final"]
+
+    project_templates_response = client.get(
+        "/api/v1/workflow-templates",
+        headers=producer_headers,
+        params={"project_id": 1},
+    )
+    assert project_templates_response.status_code == 200
+    assert any(
+        item["basedOnTemplateKey"] == global_template_key
+        for item in project_templates_response.json()
+    )
+
+
 def test_assets_and_annotations_are_scoped_to_project_membership(client: TestClient) -> None:
     asset_response = client.get("/api/v1/assets", headers={"X-User-ID": "6"})
     annotation_response = client.get("/api/v1/annotations", headers={"X-User-ID": "6"})

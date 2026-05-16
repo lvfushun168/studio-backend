@@ -25,11 +25,12 @@ class ReviewRecord(TimestampMixin, Base):
 class WorkflowTemplate(TimestampMixin, Base):
     __tablename__ = "workflow_templates"
     __table_args__ = (
-        UniqueConstraint("project_id", "name", name="uq_workflow_template_project_name"),
+        UniqueConstraint("scope", "project_id", "name", name="uq_workflow_template_scope_project_name"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, default="project", index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     based_on_template_key: Mapped[str | None] = mapped_column(String(64), nullable=True)

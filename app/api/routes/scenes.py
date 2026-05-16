@@ -14,7 +14,12 @@ from app.core.auth import (
     is_project_member,
 )
 from app.core.database import get_db
-from app.domains.stage_templates import build_default_stage_progress, get_template_keys, stage_template_exists
+from app.domains.stage_templates import (
+    build_default_stage_progress,
+    get_template_keys,
+    materialize_template_for_project,
+    stage_template_exists,
+)
 from app.models.project import SceneAssignment, SceneGroup
 from app.models.asset import Asset
 from app.models.scene import Scene, StageProgress
@@ -149,14 +154,20 @@ def create_scene(
     require_project_access(payload.project_id, current_user, db)
     if not stage_template_exists(db, payload.stage_template, payload.project_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage template not found")
+    effective_stage_template = materialize_template_for_project(
+        db,
+        payload.stage_template,
+        payload.project_id,
+        current_user.id,
+    )
     scene = Scene(
         project_id=payload.project_id,
         scene_group_id=payload.scene_group_id,
         name=payload.name,
         description=payload.description,
         level=payload.level,
-        stage_template=payload.stage_template,
-        pipeline=payload.pipeline,
+        stage_template=effective_stage_template,
+        pipeline=effective_stage_template,
         frame_count=payload.frame_count,
         duration_seconds=payload.duration_seconds,
         sort_order=payload.sort_order,
@@ -166,7 +177,7 @@ def create_scene(
     db.add(scene)
     db.flush()
 
-    for item in build_default_stage_progress(db, payload.stage_template, payload.project_id, scene.id):
+    for item in build_default_stage_progress(db, effective_stage_template, payload.project_id, scene.id):
         db.add(StageProgress(**item))
 
     record_audit(

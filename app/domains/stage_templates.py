@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 
@@ -64,6 +65,7 @@ STAGE_TEMPLATES = {
 }
 
 PROJECT_TEMPLATE_PREFIX = "project_template:"
+GLOBAL_TEMPLATE_PREFIX = "global_template:"
 STAGE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -71,10 +73,23 @@ def make_project_template_key(template_id: int) -> str:
     return f"{PROJECT_TEMPLATE_PREFIX}{template_id}"
 
 
+def make_global_template_key(template_id: int) -> str:
+    return f"{GLOBAL_TEMPLATE_PREFIX}{template_id}"
+
+
 def parse_project_template_key(template_key: str | None) -> int | None:
     if not template_key or not template_key.startswith(PROJECT_TEMPLATE_PREFIX):
         return None
     raw_id = template_key[len(PROJECT_TEMPLATE_PREFIX):]
+    if not raw_id.isdigit():
+        return None
+    return int(raw_id)
+
+
+def parse_global_template_key(template_key: str | None) -> int | None:
+    if not template_key or not template_key.startswith(GLOBAL_TEMPLATE_PREFIX):
+        return None
+    raw_id = template_key[len(GLOBAL_TEMPLATE_PREFIX):]
     if not raw_id.isdigit():
         return None
     return int(raw_id)
@@ -140,7 +155,15 @@ def resolve_stage_template_steps(
         from app.models.workflow import WorkflowTemplate
 
         template = db.get(WorkflowTemplate, template_id)
-        if template and (project_id is None or template.project_id == project_id):
+        if template and template.scope == "project" and (project_id is None or template.project_id == project_id):
+            return clone_stage_steps(template.steps_json or [])
+
+    template_id = parse_global_template_key(stage_template)
+    if template_id is not None and db is not None:
+        from app.models.workflow import WorkflowTemplate
+
+        template = db.get(WorkflowTemplate, template_id)
+        if template and template.scope == "global":
             return clone_stage_steps(template.steps_json or [])
 
     return clone_stage_steps(STAGE_TEMPLATES["ai_single_frame"])
@@ -159,9 +182,71 @@ def stage_template_exists(
         from app.models.workflow import WorkflowTemplate
 
         template = db.get(WorkflowTemplate, template_id)
-        return bool(template and (project_id is None or template.project_id == project_id))
+        return bool(template and template.scope == "project" and (project_id is None or template.project_id == project_id))
+
+    template_id = parse_global_template_key(stage_template)
+    if template_id is not None and db is not None:
+        from app.models.workflow import WorkflowTemplate
+
+        template = db.get(WorkflowTemplate, template_id)
+        return bool(template and template.scope == "global")
 
     return False
+
+
+def materialize_template_for_project(
+    db: Session,
+    stage_template: str,
+    project_id: int,
+    created_by: int | None = None,
+) -> str:
+    template_id = parse_global_template_key(stage_template)
+    if template_id is None:
+        return stage_template
+
+    from app.models.workflow import WorkflowTemplate
+
+    source_template = db.get(WorkflowTemplate, template_id)
+    if not source_template or source_template.scope != "global":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage template not found")
+
+    existing = db.scalar(
+        select(WorkflowTemplate).where(
+            WorkflowTemplate.scope == "project",
+            WorkflowTemplate.project_id == project_id,
+            WorkflowTemplate.based_on_template_key == stage_template,
+        ).limit(1)
+    )
+    if existing:
+        return make_project_template_key(existing.id)
+
+    base_name = source_template.name
+    candidate_name = base_name
+    suffix = 2
+    while db.scalar(
+        select(WorkflowTemplate.id).where(
+            WorkflowTemplate.scope == "project",
+            WorkflowTemplate.project_id == project_id,
+            WorkflowTemplate.name == candidate_name,
+        ).limit(1)
+    ):
+        candidate_name = f"{base_name} {suffix}"
+        suffix += 1
+
+    cloned = WorkflowTemplate(
+        scope="project",
+        project_id=project_id,
+        name=candidate_name,
+        description=source_template.description,
+        based_on_template_key=stage_template,
+        is_default=False,
+        is_active=source_template.is_active,
+        steps_json=clone_stage_steps(source_template.steps_json or []),
+        created_by=created_by,
+    )
+    db.add(cloned)
+    db.flush()
+    return make_project_template_key(cloned.id)
 
 
 def get_template_keys(db: Session | None, stage_template: str, project_id: int | None = None) -> list[str]:

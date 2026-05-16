@@ -13,6 +13,7 @@ class ProjectCreate(CamelCaseModel):
     visibility: str = "private"
     deadline_at: datetime | None = None
     member_ids: list[int] = []
+    workflow_template_source_keys: list[str] = []
 
 
 class ProjectUpdate(CamelCaseModel):

@@ -5,7 +5,8 @@ from app.schemas.system import StageTemplateItem
 
 
 class WorkflowTemplateCreate(CamelCaseModel):
-    project_id: int
+    scope: str = Field(default="project", max_length=16)
+    project_id: int | None = None
     name: str = Field(min_length=1, max_length=128)
     description: str | None = None
     based_on_template_key: str | None = Field(default=None, max_length=64)
@@ -24,7 +25,8 @@ class WorkflowTemplateUpdate(CamelCaseModel):
 
 class WorkflowTemplateRead(CamelCaseORMModel):
     id: int
-    project_id: int
+    scope: str
+    project_id: int | None
     name: str
     description: str | None
     based_on_template_key: str | None

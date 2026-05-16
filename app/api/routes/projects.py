@@ -11,12 +11,65 @@ from app.core.auth import (
     require_role,
 )
 from app.core.database import get_db
+from app.domains.stage_templates import (
+    make_global_template_key,
+    parse_global_template_key,
+    resolve_stage_template_steps,
+    stage_template_exists,
+)
 from app.models.admin import AuditLog
 from app.models.project import Project, UserProjectMembership
+from app.models.workflow import WorkflowTemplate
 from app.schemas.project import ProjectCreate, ProjectMemberWrite, ProjectRead, ProjectUpdate
 from app.services.audit_service import record_audit
 
 router = APIRouter()
+
+
+def _clone_global_workflow_templates_to_project(
+    db: Session,
+    *,
+    project: Project,
+    source_keys: list[str],
+    current_user_id: int,
+) -> None:
+    unique_keys: list[str] = []
+    seen_keys: set[str] = set()
+    for key in source_keys:
+        normalized_key = (key or "").strip()
+        if normalized_key and normalized_key not in seen_keys:
+            unique_keys.append(normalized_key)
+            seen_keys.add(normalized_key)
+
+    imported_templates: list[WorkflowTemplate] = []
+    for template_key in unique_keys:
+        template_id = parse_global_template_key(template_key)
+        if template_id is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Only global workflow templates can be imported when creating a project")
+        source_template = db.get(WorkflowTemplate, template_id)
+        if not source_template or source_template.scope != "global" or source_template.project_id is not None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Global workflow template not found")
+        if not stage_template_exists(db, make_global_template_key(source_template.id), None):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Global workflow template not found")
+        imported_templates.append(source_template)
+
+    default_source_id = next((item.id for item in imported_templates if item.is_default), None)
+    if default_source_id is None and len(imported_templates) == 1:
+        default_source_id = imported_templates[0].id
+
+    for source_template in imported_templates:
+        cloned = WorkflowTemplate(
+            scope="project",
+            project_id=project.id,
+            name=source_template.name,
+            description=source_template.description,
+            based_on_template_key=make_global_template_key(source_template.id),
+            is_default=source_template.id == default_source_id,
+            is_active=source_template.is_active,
+            steps_json=resolve_stage_template_steps(db, make_global_template_key(source_template.id), None),
+            created_by=current_user_id,
+        )
+        db.add(cloned)
 
 
 @router.get("", response_model=list[ProjectRead])
@@ -84,6 +137,12 @@ def create_project(
         target_id=project.id,
         project_id=project.id,
         summary=f"Created project {project.name}",
+    )
+    _clone_global_workflow_templates_to_project(
+        db,
+        project=project,
+        source_keys=payload.workflow_template_source_keys,
+        current_user_id=current_user.id,
     )
     db.commit()
     stmt = select(Project).options(selectinload(Project.memberships)).where(Project.id == project.id)

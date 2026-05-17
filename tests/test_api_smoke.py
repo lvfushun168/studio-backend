@@ -62,6 +62,52 @@ def client(test_database_url: str) -> TestClient:
     return TestClient(app)
 
 
+def initialize_entry_stage(
+    client: TestClient,
+    scene_id: int,
+    *,
+    project_id: int = 1,
+    scene_group_id: int = 1,
+    stage_key: str = "storyboard",
+    asset_name: str | None = None,
+    asset_headers: dict[str, str] | None = None,
+    init_headers: dict[str, str] | None = None,
+) -> None:
+    asset_headers = asset_headers or {"X-User-ID": "5"}
+    init_headers = init_headers or {"X-User-ID": "2"}
+    original_name = asset_name or f"{stage_key}_{uuid.uuid4().hex[:6]}.png"
+
+    create_asset_response = client.post(
+        "/api/v1/assets",
+        headers=asset_headers,
+        json={
+            "project_id": project_id,
+            "scene_group_id": scene_group_id,
+            "scene_id": scene_id,
+            "stage_key": stage_key,
+            "asset_type": "original",
+            "media_type": "image",
+            "original_name": original_name,
+        },
+    )
+    assert create_asset_response.status_code == 201
+
+    image_buffer = BytesIO()
+    Image.new("RGB", (64, 64), color=(120, 160, 220)).save(image_buffer, format="PNG")
+    upload_response = client.post(
+        f"/api/v1/upload/assets/{create_asset_response.json()['id']}/file",
+        headers=asset_headers,
+        files={"file": (original_name, image_buffer.getvalue(), "image/png")},
+    )
+    assert upload_response.status_code == 200
+
+    init_response = client.post(
+        f"/api/v1/workflow/scenes/{scene_id}/initialize-entry",
+        headers=init_headers,
+    )
+    assert init_response.status_code == 200
+
+
 def test_projects_require_authentication(client: TestClient) -> None:
     response = client.get("/api/v1/projects")
     assert response.status_code == 401
@@ -437,34 +483,13 @@ def test_project_workflow_template_can_drive_scene_flow_and_freeze_structure(cli
     scene_payload = scene_response.json()
     assert list(scene_payload["stageProgress"].keys()) == ["storyboard"]
 
-    asset_response = client.post(
-        "/api/v1/assets",
-        headers=artist_headers,
-        json={
-            "project_id": 1,
-            "scene_group_id": 1,
-            "scene_id": scene_payload["id"],
-            "stage_key": "storyboard",
-            "asset_type": "original",
-            "media_type": "image",
-            "original_name": "custom-template-storyboard.png",
-        },
+    initialize_entry_stage(
+        client,
+        scene_payload["id"],
+        asset_name="custom-template-storyboard.png",
+        asset_headers=artist_headers,
+        init_headers=director_headers,
     )
-    assert asset_response.status_code == 201
-
-    submit_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_payload['id']}/submit",
-        headers=artist_headers,
-        json={"stage_key": "storyboard"},
-    )
-    assert submit_response.status_code == 200
-
-    approve_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_payload['id']}/approve",
-        headers=director_headers,
-        json={"stage_key": "storyboard"},
-    )
-    assert approve_response.status_code == 200
 
     refreshed_scene = client.get(f"/api/v1/scenes/{scene_payload['id']}", headers=director_headers)
     assert refreshed_scene.status_code == 200
@@ -764,29 +789,13 @@ def test_standard_storyboard_approval_unlocks_both_layout_branches(client: TestC
     assert create_response.status_code == 201
     scene_id = create_response.json()["id"]
 
-    create_stage_asset(
+    initialize_entry_stage(
         client,
-        artist_headers,
-        project_id=1,
-        scene_group_id=1,
-        scene_id=scene_id,
-        stage_key="storyboard",
-        original_name="standard_unlock_storyboard.png",
+        scene_id,
+        asset_name="standard_unlock_storyboard.png",
+        asset_headers=artist_headers,
+        init_headers=director_headers,
     )
-
-    submit_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_id}/submit",
-        headers=artist_headers,
-        json={"stage_key": "storyboard"},
-    )
-    assert submit_response.status_code == 200
-
-    approve_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_id}/approve",
-        headers=director_headers,
-        json={"stage_key": "storyboard"},
-    )
-    assert approve_response.status_code == 200
 
     scene_response = client.get(f"/api/v1/scenes/{scene_id}", headers=director_headers)
     assert scene_response.status_code == 200
@@ -814,29 +823,13 @@ def test_approved_stage_asset_cannot_be_deleted(client: TestClient) -> None:
     assert create_scene_response.status_code == 201
     scene_id = create_scene_response.json()["id"]
 
-    create_stage_asset(
+    initialize_entry_stage(
         client,
-        artist_headers,
-        project_id=1,
-        scene_group_id=1,
-        scene_id=scene_id,
-        stage_key="storyboard",
-        original_name="approved_stage_guard_storyboard.png",
+        scene_id,
+        asset_name="approved_stage_guard_storyboard.png",
+        asset_headers=artist_headers,
+        init_headers=director_headers,
     )
-
-    submit_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_id}/submit",
-        headers=artist_headers,
-        json={"stage_key": "storyboard"},
-    )
-    assert submit_response.status_code == 200
-
-    approve_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_id}/approve",
-        headers=director_headers,
-        json={"stage_key": "storyboard"},
-    )
-    assert approve_response.status_code == 200
 
     create_asset_response = client.post(
         "/api/v1/assets",
@@ -878,29 +871,13 @@ def test_scene_with_review_history_cannot_be_deleted(client: TestClient) -> None
     assert create_scene_response.status_code == 201
     scene_id = create_scene_response.json()["id"]
 
-    create_stage_asset(
+    initialize_entry_stage(
         client,
-        artist_headers,
-        project_id=1,
-        scene_group_id=1,
-        scene_id=scene_id,
-        stage_key="storyboard",
-        original_name="delete_guard_storyboard.png",
+        scene_id,
+        asset_name="delete_guard_storyboard.png",
+        asset_headers=artist_headers,
+        init_headers=director_headers,
     )
-
-    submit_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_id}/submit",
-        headers=artist_headers,
-        json={"stage_key": "storyboard"},
-    )
-    assert submit_response.status_code == 200
-
-    approve_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_id}/approve",
-        headers=director_headers,
-        json={"stage_key": "storyboard"},
-    )
-    assert approve_response.status_code == 200
 
     delete_response = client.delete(f"/api/v1/scenes/{scene_id}", headers=director_headers)
     assert delete_response.status_code == 409
@@ -1313,57 +1290,12 @@ def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) ->
     assert create_scene.status_code == 201
     scene_id = create_scene.json()["id"]
 
-    create_stage_asset(
-        client,
-        {"X-User-ID": "5"},
-        project_id=1,
-        scene_group_id=1,
-        scene_id=scene_id,
-        stage_key="storyboard",
-        original_name="workflow_storyboard.png",
-    )
+    initialize_entry_stage(client, scene_id, asset_name="workflow_storyboard.png")
 
-    submit_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_id}/submit",
-        headers={"X-User-ID": "5"},
-        json={"stage_key": "storyboard"},
-    )
-    assert submit_response.status_code == 200
-    submit_record = submit_response.json()[0]
-    assert submit_record["action"] == "submit"
-    assert submit_record["toStatus"] == "reviewing"
-
-    director_notifications_after_submit = client.get("/api/v1/notifications", headers={"X-User-ID": "2"})
-    assert director_notifications_after_submit.status_code == 200
-    submit_notification = next(
-        (
-            item for item in director_notifications_after_submit.json()
-            if item["type"] == "review_required"
-            and item["payloadJson"]["scene_id"] == scene_id
-            and item["payloadJson"]["stage"] == "storyboard"
-        ),
-        None,
-    )
-    assert submit_notification is not None
-    assert submit_notification["status"] == "unread"
-
-    approve_response = client.post(
-        f"/api/v1/workflow/scenes/{scene_id}/approve",
-        headers={"X-User-ID": "2"},
-        json={"stage_key": "storyboard", "comment": "approved"},
-    )
-    assert approve_response.status_code == 200
-    approve_records = approve_response.json()
-    assert any(item["action"] == "approve" and item["toStatus"] == "approved" for item in approve_records)
-
-    director_notifications_after_approve = client.get("/api/v1/notifications", headers={"X-User-ID": "2"})
-    assert director_notifications_after_approve.status_code == 200
-    approved_notification = next(item for item in director_notifications_after_approve.json() if item["id"] == submit_notification["id"])
-    assert approved_notification["status"] == "read"
-
-    scene_after_approve = client.get(f"/api/v1/scenes/{scene_id}", headers={"X-User-ID": "2"})
-    assert scene_after_approve.status_code == 200
-    assert scene_after_approve.json()["stageProgress"]["ai_draw"]["status"] == "pending"
+    scene_after_initialize = client.get(f"/api/v1/scenes/{scene_id}", headers={"X-User-ID": "2"})
+    assert scene_after_initialize.status_code == 200
+    assert scene_after_initialize.json()["stageProgress"]["storyboard"]["status"] == "approved"
+    assert scene_after_initialize.json()["stageProgress"]["ai_draw"]["status"] == "pending"
 
     accept_final = client.post(
         f"/api/v1/scenes/{scene_id}/stages/ai_draw/accept",
@@ -1377,6 +1309,20 @@ def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) ->
         json={"stage_key": "ai_draw"},
     )
     assert submit_final.status_code == 200
+    submit_notification = next(
+        (
+            item for item in client.get("/api/v1/notifications", headers={"X-User-ID": "2"}).json()
+            if item["type"] == "review_required"
+            and item["payloadJson"]["scene_id"] == scene_id
+            and item["payloadJson"]["stage"] == "ai_draw"
+        ),
+        None,
+    )
+    assert submit_notification is not None
+    assert submit_notification["status"] == "unread"
+
+    director_notifications_after_submit = client.get("/api/v1/notifications", headers={"X-User-ID": "2"})
+    assert director_notifications_after_submit.status_code == 200
 
     reject_response = client.post(
         f"/api/v1/workflow/scenes/{scene_id}/reject",
@@ -1387,6 +1333,11 @@ def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) ->
     reject_records = reject_response.json()
     assert any(item["action"] == "reject" and item["toStatus"] == "rejected" for item in reject_records)
     assert not any(item["action"] == "rollback" for item in reject_records)
+
+    director_notifications_after_reject = client.get("/api/v1/notifications", headers={"X-User-ID": "2"})
+    assert director_notifications_after_reject.status_code == 200
+    rejected_notification = next(item for item in director_notifications_after_reject.json() if item["id"] == submit_notification["id"])
+    assert rejected_notification["status"] == "read"
 
     scene_after_reject = client.get(f"/api/v1/scenes/{scene_id}", headers={"X-User-ID": "2"})
     assert scene_after_reject.status_code == 200
@@ -1427,8 +1378,44 @@ def test_submit_stage_requires_existing_assets(client: TestClient) -> None:
         headers={"X-User-ID": "5"},
         json={"stage_key": "storyboard"},
     )
-    assert submit_response.status_code == 409
-    assert submit_response.json()["detail"] == "Stage 'storyboard' has no assets and cannot be submitted"
+    assert submit_response.status_code == 400
+    assert submit_response.json()["detail"] == "Cannot submit from status 'locked'"
+
+
+def test_initialize_entry_stage_auto_approves_and_unlocks_next_stage(client: TestClient) -> None:
+    create_scene = client.post(
+        "/api/v1/scenes",
+        headers={"X-User-ID": "4"},
+        json={
+            "project_id": 1,
+            "scene_group_id": 1,
+            "name": f"INIT_{uuid.uuid4().hex[:6]}",
+            "description": "entry initialization",
+            "level": "B",
+            "stage_template": "ai_single_frame",
+            "pipeline": "ai_single_frame",
+        },
+    )
+    assert create_scene.status_code == 201
+    scene_id = create_scene.json()["id"]
+    assert create_scene.json()["stageProgress"]["storyboard"]["status"] == "locked"
+
+    initialize_entry_stage(client, scene_id)
+
+    refreshed_scene = client.get(f"/api/v1/scenes/{scene_id}", headers={"X-User-ID": "2"})
+    assert refreshed_scene.status_code == 200
+    payload = refreshed_scene.json()
+    assert payload["stageProgress"]["storyboard"]["status"] == "approved"
+    assert payload["stageProgress"]["ai_draw"]["status"] == "pending"
+
+    records_response = client.get(f"/api/v1/workflow/scenes/{scene_id}/records", headers={"X-User-ID": "2"})
+    assert records_response.status_code == 200
+    assert any(
+        item["action"] == "initialize"
+        and item["stageKey"] == "storyboard"
+        and item["toStatus"] == "approved"
+        for item in records_response.json()
+    )
 
 
 def test_global_asset_can_be_referenced_into_scene_stage(client: TestClient) -> None:

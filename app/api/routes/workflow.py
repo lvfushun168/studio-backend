@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import ARTIST_ROLES, CurrentUser, DIRECTOR_ROLES, require_project_access, require_role
+from app.core.auth import ARTIST_ROLES, CurrentUser, DIRECTOR_PRODUCER_ROLES, DIRECTOR_ROLES, require_project_access, require_role
 from app.core.database import get_db
 from app.models.scene import Scene, StageProgress
 from app.models.workflow import ReviewRecord
@@ -16,6 +16,22 @@ from app.schemas.workflow import (
 from app.services import workflow_service
 
 router = APIRouter()
+
+
+@router.post("/scenes/{scene_id}/initialize-entry", response_model=list[ReviewRecordRead])
+def initialize_scene_entry(
+    scene_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> list[ReviewRecord]:
+    require_role(DIRECTOR_PRODUCER_ROLES)(current_user)
+    scene = db.get(Scene, scene_id)
+    if not scene:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+    require_project_access(scene.project_id, current_user, db)
+
+    records = workflow_service.initialize_entry_stage(db, scene, current_user.id)
+    return records
 
 
 @router.post("/scenes/{scene_id}/submit", response_model=list[ReviewRecordRead])

@@ -261,13 +261,13 @@ def build_default_stage_progress(
 ) -> list[dict]:
     template = resolve_stage_template_steps(db, stage_template, project_id)
     result: list[dict] = []
-    for index, item in enumerate(template):
+    for item in template:
         result.append(
             {
                 "project_id": project_id,
                 "scene_id": scene_id,
                 "stage_key": item["key"],
-                "status": "pending" if index == 0 else "locked",
+                "status": "locked",
             }
         )
     return result

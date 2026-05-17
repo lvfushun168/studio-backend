@@ -92,6 +92,33 @@ def upload(path: str, file_name: str, content: bytes, mime: str,
     return r
 
 
+def initialize_entry_stage(
+    scene_id: int,
+    *,
+    project_id: int = 1,
+    scene_group_id: int = 1,
+    original_name: str | None = None,
+    color=(100, 150, 200),
+) -> requests.Response:
+    asset = post("/assets", headers=ARTIST_HEADERS, json={
+        "project_id": project_id,
+        "scene_group_id": scene_group_id,
+        "scene_id": scene_id,
+        "stage_key": "storyboard",
+        "asset_type": "original",
+        "media_type": "image",
+        "original_name": original_name or f"init_{uuid.uuid4().hex[:6]}.png",
+    })
+    upload(
+        f"/upload/assets/{asset.json()['id']}/file",
+        "init.png",
+        png_bytes(color=color),
+        "image/png",
+        headers=ARTIST_HEADERS,
+    )
+    return post(f"/workflow/scenes/{scene_id}/initialize-entry", headers=PRODUCER_HEADERS)
+
+
 def png_bytes(w=320, h=240, color=(100, 150, 200)) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (w, h), color).save(buf, format="PNG")
@@ -195,53 +222,36 @@ class TestRoleBoundaries:
 
     def test_producer_receives_review_notifications(self):
         """制片人应收到画师提交后的审批通知。"""
-        # 找 ai_single_frame 镜头
-        m = get("/scenes/matrix", headers=DIRECTOR_HEADERS, params={"project_id": 1}).json()
-        target = next((s for s in m["scenes"] if s["stageTemplate"] == "ai_single_frame"), None)
-        assert target is not None
-        scene_id = target["id"]
-        # 确认 storyboard 状态
-        if target["stageProgress"]["storyboard"]["status"] == "approved":
-            # 找一个 pending 镜头
-            target = next((s for s in m["scenes"]
-                           if s["stageProgress"]["storyboard"]["status"] in ("pending", "in_progress")), None)
-        if target:
-            scene_id = target["id"]
+        r = post("/scenes", headers=PRODUCER_HEADERS, json={
+            "project_id": 1, "scene_group_id": 1,
+            "name": f"PROD_NOTIF_{uuid.uuid4().hex[:4]}",
+            "level": "B",
+            "stage_template": "ai_single_frame",
+            "pipeline": "ai_single_frame",
+        })
+        scene_id = r.json()["id"]
+        initialize_entry_stage(scene_id, original_name=f"submit_test_{uuid.uuid4().hex[:6]}.png")
 
-        # 上传资产再提交
-        scene = get(f"/scenes/{scene_id}", headers=DIRECTOR_HEADERS).json()
-        storyboard_status = scene["stageProgress"]["storyboard"]["status"]
-        if storyboard_status in ("pending", "in_progress"):
-            pass  # 已就绪
-        else:
-            # 找其他 pending 镜头
-            scene_id = next(s["id"] for s in m["scenes"]
-                           if s["stageProgress"]["storyboard"]["status"] in ("pending", "in_progress"))
-
-        # 上传一个资产
         asset = post("/assets", headers=ARTIST_HEADERS, json={
             "project_id": 1, "scene_group_id": 1, "scene_id": scene_id,
-            "stage_key": "storyboard", "asset_type": "original",
-            "media_type": "image", "original_name": f"submit_test_{uuid.uuid4().hex[:6]}.png",
+            "stage_key": "ai_draw", "asset_type": "original",
+            "media_type": "image", "original_name": f"submit_ai_{uuid.uuid4().hex[:6]}.png",
         })
-        assert asset.status_code == 201
-        aid = asset.json()["id"]
-        upload("/upload/assets/{}/file".format(aid), "submit_test.png",
-               png_bytes(), "image/png", headers=ARTIST_HEADERS)
+        upload("/upload/assets/{}/file".format(asset.json()["id"]), "submit_ai.png",
+               png_bytes(color=(255, 100, 100)), "image/png", headers=ARTIST_HEADERS)
 
-        # submit
         r = post(f"/workflow/scenes/{scene_id}/submit",
-                 headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
-        if r.status_code == 200:
-            # 制片人应收到通知
-            notifs = get("/notifications", headers=PRODUCER_HEADERS).json()
-            assert any(n["type"] == "review_required" and
-                       n["payloadJson"].get("scene_id") == scene_id
-                       for n in notifs), "制片人应收到审批通知"
+                 headers=ARTIST_HEADERS, json={"stage_key": "ai_draw"})
+        assert r.status_code == 200
+
+        notifs = get("/notifications", headers=PRODUCER_HEADERS).json()
+        assert any(n["type"] == "review_required" and
+                   n["payloadJson"].get("scene_id") == scene_id and
+                   n["payloadJson"].get("stage") == "ai_draw"
+                   for n in notifs), "制片人应收到审批通知"
 
     def test_director_receives_review_notifications(self):
         """导演也应收到审批通知。"""
-        # 创建新镜头保证 storyboard 可提交
         r = post("/scenes", headers=PRODUCER_HEADERS, json={
             "project_id": 1, "scene_group_id": 1,
             "name": f"DIR_NOTIF_{uuid.uuid4().hex[:4]}",
@@ -250,10 +260,11 @@ class TestRoleBoundaries:
             "pipeline": "ai_single_frame",
         })
         scene_id = r.json()["id"]
+        initialize_entry_stage(scene_id, original_name=f"director_init_{uuid.uuid4().hex[:6]}.png")
 
         asset = post("/assets", headers=ARTIST_HEADERS, json={
             "project_id": 1, "scene_group_id": 1, "scene_id": scene_id,
-            "stage_key": "storyboard", "asset_type": "original",
+            "stage_key": "ai_draw", "asset_type": "original",
             "media_type": "image", "original_name": f"director_notify_test_{uuid.uuid4().hex[:6]}.png",
         })
         assert asset.status_code == 201
@@ -262,11 +273,12 @@ class TestRoleBoundaries:
                png_bytes(), "image/png", headers=ARTIST_HEADERS)
 
         r = post(f"/workflow/scenes/{scene_id}/submit",
-                 headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
+                 headers=ARTIST_HEADERS, json={"stage_key": "ai_draw"})
         assert r.status_code == 200
         notifs = get("/notifications", headers=DIRECTOR_HEADERS).json()
         assert any(n["type"] == "review_required" and
-                   n["payloadJson"].get("scene_id") == scene_id
+                   n["payloadJson"].get("scene_id") == scene_id and
+                   n["payloadJson"].get("stage") == "ai_draw"
                    for n in notifs)
 
 
@@ -350,18 +362,7 @@ class TestLayoutDualTrack:
         assert r.status_code == 201
         scene_id = r.json()["id"]
 
-        # Step 1: 完成 storyboard（全流程先驱）
-        asset_sb = post("/assets", headers=ARTIST_HEADERS, json={
-            "project_id": 1, "scene_group_id": 1, "scene_id": scene_id,
-            "stage_key": "storyboard", "asset_type": "original",
-            "media_type": "image", "original_name": f"sb_lo_{uuid.uuid4().hex[:6]}.png",
-        })
-        upload("/upload/assets/{}/file".format(asset_sb.json()["id"]),
-               "sb.png", png_bytes(), "image/png", ARTIST_HEADERS)
-        post(f"/workflow/scenes/{scene_id}/submit",
-             headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
-        post(f"/workflow/scenes/{scene_id}/approve",
-             headers=DIRECTOR_HEADERS, json={"stage_key": "storyboard"})
+        initialize_entry_stage(scene_id, original_name=f"sb_lo_{uuid.uuid4().hex[:6]}.png")
 
         # Step 2: 接受 layout_character -> in_progress -> 提交 -> 审批
         post(f"/scenes/{scene_id}/stages/layout_character/accept",
@@ -411,18 +412,7 @@ class TestLayoutDualTrack:
         assert r.status_code == 201
         scene_id = r.json()["id"]
 
-        # 先通过 storyboard
-        asset_sb = post("/assets", headers=ARTIST_HEADERS, json={
-            "project_id": 1, "scene_group_id": 1, "scene_id": scene_id,
-            "stage_key": "storyboard", "asset_type": "original",
-            "media_type": "image", "original_name": f"sb_test_{uuid.uuid4().hex[:6]}.png",
-        })
-        upload("/upload/assets/{}/file".format(asset_sb.json()["id"]),
-               "sb.png", png_bytes(), "image/png", ARTIST_HEADERS)
-        post(f"/workflow/scenes/{scene_id}/submit",
-             headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
-        post(f"/workflow/scenes/{scene_id}/approve",
-             headers=DIRECTOR_HEADERS, json={"stage_key": "storyboard"})
+        initialize_entry_stage(scene_id, original_name=f"sb_test_{uuid.uuid4().hex[:6]}.png")
 
         # layout_character approved
         asset_lc = post("/assets", headers=ARTIST_HEADERS, json={
@@ -879,31 +869,9 @@ class TestWorkflowComplete:
         assert r.status_code == 201
         scene_id = r.json()["id"]
 
-        # 上传 storyboard 资产
-        asset = post("/assets", headers=ARTIST_HEADERS, json={
-            "project_id": 1, "scene_group_id": 1, "scene_id": scene_id,
-            "stage_key": "storyboard", "asset_type": "original",
-            "media_type": "image",
-            "original_name": f"wf_sb_{uuid.uuid4().hex[:6]}.png",
-        })
-        asset_id = asset.json()["id"]
-        upload("/upload/assets/{}/file".format(asset_id),
-               "wf_sb.png", png_bytes(), "image/png", ARTIST_HEADERS)
-
-        # submit
-        r = post(f"/workflow/scenes/{scene_id}/submit",
-                 headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
+        r = initialize_entry_stage(scene_id, original_name=f"wf_sb_{uuid.uuid4().hex[:6]}.png")
         assert r.status_code == 200
-        rec = r.json()[0]
-        assert rec["action"] == "submit"
-        assert rec["toStatus"] == "reviewing"
-
-        # approve
-        r = post(f"/workflow/scenes/{scene_id}/approve",
-                 headers=DIRECTOR_HEADERS, json={
-                     "stage_key": "storyboard", "comment": "OK"})
-        assert r.status_code == 200
-        assert any(x["action"] == "approve" and x["toStatus"] == "approved"
+        assert any(x["action"] == "initialize" and x["toStatus"] == "approved"
                    for x in r.json())
 
         # verify ai_draw unlocked
@@ -956,8 +924,8 @@ class TestWorkflowComplete:
 
         r = post_raw(f"/workflow/scenes/{scene_id}/submit",
                      headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
-        assert r.status_code == 409
-        assert "no assets" in r.json()["detail"].lower()
+        assert r.status_code == 400
+        assert "cannot submit from status 'locked'" in r.json()["detail"].lower()
 
     def test_approved_asset_cannot_be_deleted(self):
         # 创建镜头并完成 storyboard
@@ -970,20 +938,7 @@ class TestWorkflowComplete:
         })
         scene_id = r.json()["id"]
 
-        asset = post("/assets", headers=ARTIST_HEADERS, json={
-            "project_id": 1, "scene_group_id": 1, "scene_id": scene_id,
-            "stage_key": "storyboard", "asset_type": "original",
-            "media_type": "image",
-            "original_name": f"no_del_{uuid.uuid4().hex[:6]}.png",
-        })
-        asset_id = asset.json()["id"]
-        upload("/upload/assets/{}/file".format(asset_id),
-               "no_del.png", png_bytes(), "image/png", ARTIST_HEADERS)
-
-        post(f"/workflow/scenes/{scene_id}/submit",
-             headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
-        post(f"/workflow/scenes/{scene_id}/approve",
-             headers=DIRECTOR_HEADERS, json={"stage_key": "storyboard"})
+        initialize_entry_stage(scene_id, original_name=f"no_del_{uuid.uuid4().hex[:6]}.png")
 
         # 再创建一个资产（storyboard 已 approved）
         asset2 = post("/assets", headers=ARTIST_HEADERS, json={
@@ -1007,19 +962,7 @@ class TestWorkflowComplete:
         })
         scene_id = r.json()["id"]
 
-        asset = post("/assets", headers=ARTIST_HEADERS, json={
-            "project_id": 1, "scene_group_id": 1, "scene_id": scene_id,
-            "stage_key": "storyboard", "asset_type": "original",
-            "media_type": "image",
-            "original_name": f"del_guard_{uuid.uuid4().hex[:6]}.png",
-        })
-        upload("/upload/assets/{}/file".format(asset.json()["id"]),
-               "del_guard.png", png_bytes(), "image/png", ARTIST_HEADERS)
-
-        post(f"/workflow/scenes/{scene_id}/submit",
-             headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
-        post(f"/workflow/scenes/{scene_id}/approve",
-             headers=DIRECTOR_HEADERS, json={"stage_key": "storyboard"})
+        initialize_entry_stage(scene_id, original_name=f"del_guard_{uuid.uuid4().hex[:6]}.png")
 
         r = delete_raw(f"/scenes/{scene_id}", headers=PRODUCER_HEADERS)
         assert r.status_code == 409
@@ -1118,9 +1061,13 @@ class TestNotifications:
             pytest.fail(f"scene creation failed: {r_scene.status_code} {r_scene.text[:300]}")
         scene_id = r_scene.json()["id"]
 
+        r_init = initialize_entry_stage(scene_id, original_name=f"notif_init_{uuid.uuid4().hex[:6]}.png")
+        if r_init.status_code != 200:
+            pytest.fail(f"initialize failed: {r_init.status_code} {r_init.text[:300]}")
+
         r_asset = post_raw("/assets", headers=ARTIST_HEADERS, json={
             "project_id": 1, "scene_group_id": 1, "scene_id": scene_id,
-            "stage_key": "storyboard", "asset_type": "original",
+            "stage_key": "ai_draw", "asset_type": "original",
             "media_type": "image",
             "original_name": f"notif_test_{uuid.uuid4().hex[:6]}.png",
         })
@@ -1134,17 +1081,18 @@ class TestNotifications:
             pytest.fail(f"upload failed: {r_up.status_code} {r_up.text[:300]}")
 
         r_sub = post_raw(f"/workflow/scenes/{scene_id}/submit",
-                         headers=ARTIST_HEADERS, json={"stage_key": "storyboard"})
+                         headers=ARTIST_HEADERS, json={"stage_key": "ai_draw"})
         if r_sub.status_code not in (200, 201):
             pytest.fail(f"submit failed: {r_sub.status_code} {r_sub.text[:300]}")
 
         r = post_raw(f"/workflow/scenes/{scene_id}/approve",
-                     headers=DIRECTOR_HEADERS, json={"stage_key": "storyboard"})
+                     headers=DIRECTOR_HEADERS, json={"stage_key": "ai_draw"})
         if r.status_code == 200:
             notifs = get("/notifications", headers=DIRECTOR_HEADERS).json()
             review_notifs = [n for n in notifs
                             if n["type"] == "review_required"
-                            and n["payloadJson"].get("scene_id") == scene_id]
+                            and n["payloadJson"].get("scene_id") == scene_id
+                            and n["payloadJson"].get("stage") == "ai_draw"]
             for n in review_notifs:
                 assert n["status"] in ("unread", "read")
 

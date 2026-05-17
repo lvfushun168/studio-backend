@@ -18,6 +18,11 @@ def _is_layout_stage(stage_key: str) -> bool:
     return stage_key in ("layout_character", "layout_background")
 
 
+def _get_first_stage_key(scene: Scene, db: Session) -> str | None:
+    keys = get_template_keys(db, scene.stage_template, scene.project_id)
+    return keys[0] if keys else None
+
+
 def _get_unlock_targets(scene: Scene, stage_key: str, db: Session) -> list[str]:
     keys = get_template_keys(db, scene.stage_template, scene.project_id)
     try:
@@ -214,6 +219,101 @@ def submit_stage(
     db.commit()
     db.refresh(record)
     return record
+
+
+def initialize_entry_stage(
+    db: Session,
+    scene: Scene,
+    user_id: int,
+) -> list[ReviewRecord]:
+    first_stage_key = _get_first_stage_key(scene, db)
+    if not first_stage_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scene workflow has no stages")
+
+    stmt = select(StageProgress).where(
+        StageProgress.scene_id == scene.id,
+        StageProgress.stage_key == first_stage_key,
+    )
+    sp = db.scalar(stmt)
+    if not sp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="StageProgress not found")
+    if sp.status == "approved":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Entry stage has already been initialized")
+    if sp.status not in ("locked", "pending", "in_progress", "rejected"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot initialize entry stage from status '{sp.status}'",
+        )
+
+    asset_exists = db.scalar(
+        select(Asset.id).where(
+            Asset.scene_id == scene.id,
+            Asset.stage_key == first_stage_key,
+        ).limit(1)
+    )
+    if asset_exists is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Entry stage '{first_stage_key}' requires at least one asset before initialization",
+        )
+
+    now = datetime.now(timezone.utc)
+    from_status = sp.status
+    sp.status = "approved"
+    sp.started_at = sp.started_at or now
+    sp.submitted_at = sp.submitted_at or now
+    sp.reviewer_id = user_id
+    sp.reviewed_at = now
+    sp.approved_at = now
+    sp.comment = "Entry stage auto-approved after initialization"
+
+    record = ReviewRecord(
+        project_id=scene.project_id,
+        scene_id=scene.id,
+        stage_progress_id=sp.id,
+        stage_key=first_stage_key,
+        action="initialize",
+        from_status=from_status,
+        to_status="approved",
+        operator_id=user_id,
+        comment="Entry stage auto-approved after initialization",
+        extra_json={"mode": "entry_auto_approve"},
+    )
+    db.add(record)
+
+    if _is_layout_stage(first_stage_key):
+        next_key = _check_layout_unlock(scene, db)
+        if next_key:
+            next_stmt = select(StageProgress).where(
+                StageProgress.scene_id == scene.id,
+                StageProgress.stage_key == next_key,
+            )
+            next_sp = db.scalar(next_stmt)
+            if next_sp and next_sp.status == "locked":
+                next_sp.status = "pending"
+    else:
+        for next_key in _get_unlock_targets(scene, first_stage_key, db):
+            next_stmt = select(StageProgress).where(
+                StageProgress.scene_id == scene.id,
+                StageProgress.stage_key == next_key,
+            )
+            next_sp = db.scalar(next_stmt)
+            if next_sp and next_sp.status == "locked":
+                next_sp.status = "pending"
+
+    _notify_scene_assignees(
+        db,
+        scene,
+        "review",
+        f"{scene.name} 的 {first_stage_key} 已初始化",
+        f"镜头 {scene.name} 的 {first_stage_key} 已随入口资产初始化自动通过",
+        {"scene_id": scene.id, "stage": first_stage_key, "mode": "entry_auto_approve"},
+        exclude_user_id=user_id,
+    )
+
+    db.commit()
+    db.refresh(record)
+    return [record]
 
 
 def approve_stage(

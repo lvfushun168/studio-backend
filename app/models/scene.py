@@ -48,5 +48,10 @@ class StageProgress(TimestampMixin, Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="normal")
+    blocked_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    production_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     scene = relationship("Scene", back_populates="stage_progresses")

@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.models.annotation import Annotation
 from app.models.asset import Asset, AssetAttachment, AssetFolder
 from app.models.scene import Scene, StageProgress
+from app.models.work_step import SceneWorkStep
 from app.schemas.activity import ActivityEventRead
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
 from app.services.activity_service import activity_payload, list_asset_activity
@@ -184,6 +185,19 @@ def create_asset(
         folder = db.get(AssetFolder, payload.folder_id)
         if not folder or folder.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset folder not found in project")
+    if payload.asset_usage not in {"stage_asset", "step_draft", "step_submission", "reference", "annotation_attachment", "bank_reference"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid asset_usage")
+    if payload.asset_usage in {"step_draft", "step_submission"} and payload.scene_work_step_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="scene_work_step_id is required for step assets")
+    if payload.scene_work_step_id is not None:
+        work_step = db.get(SceneWorkStep, payload.scene_work_step_id)
+        if (
+            not work_step
+            or work_step.project_id != payload.project_id
+            or work_step.scene_id != payload.scene_id
+            or work_step.stage_key != payload.stage_key
+        ):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Work step does not match the asset project, scene and stage")
     group_filter = [
         Asset.project_id == payload.project_id,
         Asset.scene_id == payload.scene_id,
@@ -210,6 +224,8 @@ def create_asset(
         note=payload.note,
         metadata_json=payload.metadata_json,
         uploaded_by=current_user.id,
+        scene_work_step_id=payload.scene_work_step_id,
+        asset_usage=payload.asset_usage,
     )
     db.add(asset)
     db.flush()

@@ -14,6 +14,7 @@ from app.schemas.workflow import (
     SubmitRequest,
 )
 from app.services import workflow_service
+from app.services import work_step_service
 
 router = APIRouter()
 
@@ -46,6 +47,7 @@ def submit_scene(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
     require_role(ARTIST_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
+    work_step_service.assert_can_submit_stage(db, scene, payload.stage_key, current_user)
 
     record = workflow_service.submit_stage(db, scene, payload.stage_key, current_user.id)
     return [record]
@@ -84,7 +86,14 @@ def reject_scene(
     require_project_access(scene.project_id, current_user, db)
 
     records = workflow_service.reject_stage(
-        db, scene, payload.stage_key, current_user.id, payload.comment, payload.reason_category
+        db,
+        scene,
+        payload.stage_key,
+        current_user.id,
+        payload.comment,
+        payload.reason_category,
+        payload.work_step_ids,
+        payload.reject_all_submitted_steps,
     )
     return records
 
@@ -101,6 +110,7 @@ def resubmit_scene(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
     require_role(ARTIST_ROLES)(current_user)
     require_project_access(scene.project_id, current_user, db)
+    work_step_service.assert_can_submit_stage(db, scene, payload.stage_key, current_user)
 
     record = workflow_service.resubmit_stage(db, scene, payload.stage_key, current_user.id)
     return record

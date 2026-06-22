@@ -25,6 +25,7 @@ from app.api.routes import (
     users,
     workflow,
     workflow_templates,
+    work_steps,
     generation,
 )
 
@@ -39,6 +40,9 @@ api_router.include_router(scene_groups.router, prefix="/scene-groups", tags=["sc
 api_router.include_router(scenes.router, prefix="/scenes", tags=["scenes"])
 api_router.include_router(workflow.router, prefix="/workflow", tags=["workflow"])
 api_router.include_router(workflow_templates.router, prefix="/workflow-templates", tags=["workflow-templates"])
+api_router.include_router(work_steps.template_router, prefix="/work-step-templates", tags=["work-step-templates"])
+api_router.include_router(work_steps.work_step_router, prefix="/work-steps", tags=["work-steps"])
+api_router.include_router(work_steps.scene_stage_router, prefix="/scenes", tags=["work-steps"])
 api_router.include_router(asset_folders.router, prefix="/asset-folders", tags=["asset-folders"])
 api_router.include_router(assets.router, prefix="/assets", tags=["assets"])
 api_router.include_router(upload.router, prefix="/upload", tags=["upload"])

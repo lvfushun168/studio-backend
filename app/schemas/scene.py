@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, computed_field
 
-from app.schemas.common import CamelCaseORMModel
+from app.schemas.common import CamelCaseModel, CamelCaseORMModel
 
 
 class StageProgressRead(CamelCaseORMModel):
@@ -18,6 +18,11 @@ class StageProgressRead(CamelCaseORMModel):
     submitted_at: datetime | None
     approved_at: datetime | None
     rejected_at: datetime | None
+    assignee_id: int | None
+    due_at: datetime | None
+    priority: str
+    blocked_reason: str | None
+    production_note: str | None
 
 
 class SceneAssignmentRead(CamelCaseORMModel):
@@ -28,7 +33,7 @@ class SceneAssignmentRead(CamelCaseORMModel):
     assigned_at: datetime
 
 
-class SceneCreate(BaseModel):
+class SceneCreate(CamelCaseModel):
     project_id: int
     scene_group_id: int
     name: str = Field(min_length=1, max_length=128)
@@ -40,6 +45,7 @@ class SceneCreate(BaseModel):
     duration_seconds: float | None = None
     sort_order: int = 0
     base_scene_id: int | None = None
+    copy_work_steps_from_scene_id: int | None = None
     created_by: int | None = None
 
 

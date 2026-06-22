@@ -20,6 +20,14 @@ from app.models.reference import Reference
 from app.models.scene import Scene, StageProgress
 from app.models.user import User
 from app.models.workflow import ReviewRecord, WorkflowTemplate
+from app.models.work_step import (
+    SceneWorkStep,
+    StepSubmission,
+    StepSubmissionAsset,
+    WorkStepEvent,
+    WorkStepTemplate,
+    WorkStepTemplateItem,
+)
 
 __all__ = [
     "Annotation",
@@ -52,4 +60,10 @@ __all__ = [
     "User",
     "UserProjectMembership",
     "WorkflowTemplate",
+    "WorkStepTemplate",
+    "WorkStepTemplateItem",
+    "SceneWorkStep",
+    "StepSubmission",
+    "StepSubmissionAsset",
+    "WorkStepEvent",
 ]

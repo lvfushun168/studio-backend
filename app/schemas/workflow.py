@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import Field
 
-from app.schemas.common import CamelCaseORMModel
+from app.schemas.common import CamelCaseModel, CamelCaseORMModel
 
 
 class ReviewRecordRead(CamelCaseORMModel):
@@ -20,21 +20,23 @@ class ReviewRecordRead(CamelCaseORMModel):
     created_at: datetime
 
 
-class SubmitRequest(BaseModel):
+class SubmitRequest(CamelCaseModel):
     stage_key: str
 
 
-class ApproveRequest(BaseModel):
-    stage_key: str
-    comment: str | None = None
-    reason_category: str | None = None
-
-
-class RejectRequest(BaseModel):
+class ApproveRequest(CamelCaseModel):
     stage_key: str
     comment: str | None = None
     reason_category: str | None = None
 
 
-class ResubmitRequest(BaseModel):
+class RejectRequest(CamelCaseModel):
+    stage_key: str
+    comment: str | None = None
+    reason_category: str | None = None
+    work_step_ids: list[int] = Field(default_factory=list)
+    reject_all_submitted_steps: bool = False
+
+
+class ResubmitRequest(CamelCaseModel):
     stage_key: str

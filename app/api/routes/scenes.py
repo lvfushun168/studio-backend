@@ -35,6 +35,7 @@ from app.schemas.scene import (
 )
 from app.services.activity_service import activity_payload, list_scene_activity
 from app.services.audit_service import record_audit
+from app.services.work_step_service import materialize_scene_work_steps
 
 router = APIRouter()
 
@@ -177,8 +178,19 @@ def create_scene(
     db.add(scene)
     db.flush()
 
-    for item in build_default_stage_progress(db, effective_stage_template, payload.project_id, scene.id):
-        db.add(StageProgress(**item))
+    stage_progresses = [
+        StageProgress(**item)
+        for item in build_default_stage_progress(db, effective_stage_template, payload.project_id, scene.id)
+    ]
+    db.add_all(stage_progresses)
+    db.flush()
+    materialize_scene_work_steps(
+        db,
+        scene,
+        stage_progresses,
+        current_user.id,
+        copy_from_scene_id=payload.copy_work_steps_from_scene_id,
+    )
 
     record_audit(
         db,

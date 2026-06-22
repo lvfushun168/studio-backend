@@ -1,8 +1,6 @@
 """Workflow service layer for stage progression and review logic."""
 
 from datetime import datetime, timezone
-from typing import Literal
-
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +10,7 @@ from app.models.asset import Asset
 from app.models.notification import Notification
 from app.models.scene import Scene, StageProgress
 from app.models.workflow import ReviewRecord
+from app.services import work_step_service
 
 
 def _is_layout_stage(stage_key: str) -> bool:
@@ -158,18 +157,7 @@ def submit_stage(
             detail=f"Cannot submit from status '{sp.status}'",
         )
 
-    if stage_key != "ai_draw":
-        asset_exists = db.scalar(
-            select(Asset.id).where(
-                Asset.scene_id == scene.id,
-                Asset.stage_key == stage_key,
-            ).limit(1)
-        )
-        if asset_exists is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Stage '{stage_key}' has no assets and cannot be submitted",
-            )
+    work_step_service.ensure_stage_ready_for_review(db, scene, stage_key, user_id)
 
     from_status = sp.status
     sp.status = "reviewing"
@@ -266,6 +254,7 @@ def initialize_entry_stage(
     sp.reviewed_at = now
     sp.approved_at = now
     sp.comment = "Entry stage auto-approved after initialization"
+    work_step_service.complete_entry_steps(db, scene, sp, user_id)
 
     record = ReviewRecord(
         project_id=scene.project_id,
@@ -291,6 +280,7 @@ def initialize_entry_stage(
             next_sp = db.scalar(next_stmt)
             if next_sp and next_sp.status == "locked":
                 next_sp.status = "pending"
+                work_step_service.activate_stage_work_steps(db, scene, next_sp, user_id)
     else:
         for next_key in _get_unlock_targets(scene, first_stage_key, db):
             next_stmt = select(StageProgress).where(
@@ -300,6 +290,7 @@ def initialize_entry_stage(
             next_sp = db.scalar(next_stmt)
             if next_sp and next_sp.status == "locked":
                 next_sp.status = "pending"
+                work_step_service.activate_stage_work_steps(db, scene, next_sp, user_id)
 
     _notify_scene_assignees(
         db,
@@ -343,6 +334,7 @@ def approve_stage(
     sp.reviewer_id = user_id
     sp.reviewed_at = datetime.now(timezone.utc)
     sp.approved_at = datetime.now(timezone.utc)
+    work_step_service.complete_submitted_steps_for_stage(db, sp, user_id)
 
     records: list[ReviewRecord] = []
     record = ReviewRecord(
@@ -378,6 +370,7 @@ def approve_stage(
             next_sp = db.scalar(next_stmt)
             if next_sp and next_sp.status == "locked":
                 next_sp.status = "pending"
+                work_step_service.activate_stage_work_steps(db, scene, next_sp, user_id)
     else:
         for next_key in _get_unlock_targets(scene, stage_key, db):
             next_stmt = select(StageProgress).where(
@@ -387,6 +380,7 @@ def approve_stage(
             next_sp = db.scalar(next_stmt)
             if next_sp and next_sp.status == "locked":
                 next_sp.status = "pending"
+                work_step_service.activate_stage_work_steps(db, scene, next_sp, user_id)
 
     # Notify scene assignees that stage was approved
     _notify_scene_assignees(
@@ -412,6 +406,8 @@ def reject_stage(
     user_id: int,
     comment: str | None = None,
     reason_category: str | None = None,
+    work_step_ids: list[int] | None = None,
+    reject_all_submitted_steps: bool = False,
 ) -> list[ReviewRecord]:
     stmt = select(StageProgress).where(
         StageProgress.scene_id == scene.id,
@@ -426,6 +422,21 @@ def reject_stage(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Stage is not under review",
         )
+
+    selected_ids = list(dict.fromkeys(work_step_ids or []))
+    if not selected_ids and not reject_all_submitted_steps and not (comment or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="An overall rejection reason is required when no work steps are selected",
+        )
+    rejected_steps = work_step_service.reject_steps_for_stage(
+        db,
+        sp,
+        user_id,
+        selected_ids,
+        comment,
+        reject_all_submitted_steps=reject_all_submitted_steps,
+    )
 
     from_status = sp.status
     sp.status = "rejected"
@@ -445,7 +456,11 @@ def reject_stage(
         to_status="rejected",
         operator_id=user_id,
         comment=comment,
-        extra_json={"reasonCategory": reason_category} if reason_category else None,
+        extra_json={
+            "reasonCategory": reason_category,
+            "workStepIds": [item.id for item in rejected_steps],
+            "rejectAllSubmittedSteps": reject_all_submitted_steps,
+        },
     )
     db.add(record)
     records.append(record)
@@ -490,11 +505,13 @@ def resubmit_stage(
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="StageProgress not found")
 
-    if sp.status != "rejected":
+    if sp.status not in {"rejected", "in_progress"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Can only resubmit a rejected stage",
+            detail="Can only resubmit a rejected or corrected stage",
         )
+
+    work_step_service.ensure_stage_ready_for_review(db, scene, stage_key, user_id)
 
     from_status = sp.status
     sp.status = "reviewing"

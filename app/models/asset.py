@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +33,15 @@ class Asset(TimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    scene_work_step_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("scene_work_steps.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    asset_usage: Mapped[str] = mapped_column(String(32), nullable=False, default="stage_asset", index=True)
+    lifecycle_status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    is_invalid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    invalid_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invalidated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     attachments = relationship("AssetAttachment", back_populates="asset", cascade="all, delete-orphan")
     folder = relationship("AssetFolder", back_populates="assets")

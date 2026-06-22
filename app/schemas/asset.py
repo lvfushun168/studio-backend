@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, computed_field
 
-from app.schemas.common import CamelCaseORMModel
+from app.schemas.common import CamelCaseModel, CamelCaseORMModel
 
 
 class AssetAttachmentRead(CamelCaseORMModel):
@@ -18,7 +18,7 @@ class AssetAttachmentRead(CamelCaseORMModel):
     updated_at: datetime
 
 
-class AssetCreate(BaseModel):
+class AssetCreate(CamelCaseModel):
     project_id: int
     scene_group_id: int | None = None
     scene_id: int | None = None
@@ -30,6 +30,8 @@ class AssetCreate(BaseModel):
     original_name: str
     note: str | None = None
     metadata_json: dict | None = None
+    scene_work_step_id: int | None = None
+    asset_usage: str = "stage_asset"
 
 
 class AssetRead(CamelCaseORMModel):
@@ -55,6 +57,13 @@ class AssetRead(CamelCaseORMModel):
     note: str | None
     metadata_json: dict | None
     uploaded_by: int = Field(serialization_alias="userId")
+    scene_work_step_id: int | None
+    asset_usage: str
+    lifecycle_status: str
+    is_invalid: bool
+    invalid_reason: str | None
+    invalidated_by: int | None
+    invalidated_at: datetime | None
     attachments: list[AssetAttachmentRead] = []
     created_at: datetime
     updated_at: datetime

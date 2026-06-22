@@ -188,6 +188,10 @@ def upload_asset_file(
             "contentType": file.content_type,
         },
         uploaded_by=current_user.id,
+        scene_work_step_id=asset.scene_work_step_id,
+        asset_usage=asset.asset_usage,
+        lifecycle_status=asset.lifecycle_status,
+        is_invalid=asset.is_invalid,
     )
     db.add(new_asset)
     db.flush()

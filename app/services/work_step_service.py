@@ -21,6 +21,7 @@ from app.models.work_step import (
 )
 from app.models.user import User
 from app.services.audit_service import record_audit
+from app.services.notification_service import notify_step_schedule_change, notify_users_for_step, project_role_user_ids
 
 
 DEFAULT_STEP_KEY = "stage_delivery"
@@ -504,6 +505,13 @@ def submit_work_step(
         summary=f"提交步骤 {work_step.name} v{version}",
         payload_json={"workStepId": work_step.id, "assetIds": asset_ids},
     )
+    notify_users_for_step(
+        db, work_step,
+        project_role_user_ids(db, work_step.project_id, {"admin", "director", "producer"}),
+        "work_step_submitted", "步骤已有新提交",
+        f"{work_step.stage_key} / {work_step.name} 已提交 v{version}",
+        exclude_user_id=user.id,
+    )
     db.commit()
     return get_submission(db, submission.id)
 
@@ -947,6 +955,7 @@ def batch_update_work_steps(
         stage_progress = _stage_progress(db, work_step)
         if stage_progress.status in {"reviewing", "approved"}:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Work step {work_step.id} belongs to a locked stage")
+        old_effective_assignee = get_effective_assignee_id(db, work_step)
         before = {field: getattr(work_step, field) for field in changes}
         for field, value in changes.items():
             setattr(work_step, field, value)
@@ -970,5 +979,14 @@ def batch_update_work_steps(
                 "before": {key: value.isoformat() if isinstance(value, datetime) else value for key, value in before.items()},
                 "after": {key: value.isoformat() if isinstance(value, datetime) else value for key, value in changes.items()},
             },
+        )
+        new_effective_assignee = get_effective_assignee_id(db, work_step)
+        notify_step_schedule_change(
+            db, work_step,
+            old_assignee_id=old_effective_assignee,
+            new_assignee_id=new_effective_assignee,
+            assignee_changed="assignee_id" in changes and old_effective_assignee != new_effective_assignee,
+            due_changed="due_at" in changes and before.get("due_at") != changes.get("due_at"),
+            operator_id=operator_id,
         )
     return steps

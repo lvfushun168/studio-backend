@@ -6,8 +6,22 @@ from app.core.auth import CurrentUser, require_project_access
 from app.core.database import get_db
 from app.models.scene import Scene, StageProgress
 from app.models.project import Project
+from app.services.project_progress_service import get_project_step_progress
 
 router = APIRouter()
+
+
+@router.get("/projects/{project_id}/work-steps")
+def get_project_work_step_progress(
+    project_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    require_project_access(project_id, current_user, db)
+    return get_project_step_progress(db, project_id)
 
 
 @router.get("/projects/{project_id}")

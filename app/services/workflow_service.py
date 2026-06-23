@@ -11,6 +11,7 @@ from app.models.notification import Notification
 from app.models.scene import Scene, StageProgress
 from app.models.workflow import ReviewRecord
 from app.services import work_step_service
+from app.services.notification_service import notify_users_for_step
 
 
 def _is_layout_stage(stage_key: str) -> bool:
@@ -473,16 +474,22 @@ def reject_stage(
         user_id,
     )
 
-    # Notify assignees about rejection
-    _notify_scene_assignees(
-        db,
-        scene,
-        "review",
-        f"{scene.name} 的 {stage_key} 被驳回",
-        f"镜头 {scene.name} 的 {stage_key} 阶段被驳回" + (f"：{comment}" if comment else ""),
-        {"scene_id": scene.id, "stage": stage_key},
-        exclude_user_id=user_id,
-    )
+    # Linked rejection goes to the exact effective step assignees; overall rejection keeps scene-level behavior.
+    if rejected_steps:
+        for rejected_step in rejected_steps:
+            assignee_id = work_step_service.get_effective_assignee_id(db, rejected_step)
+            notify_users_for_step(
+                db, rejected_step, {assignee_id} if assignee_id else set(),
+                "work_step_rejected", "步骤被关联驳回",
+                f"{scene.name} / {rejected_step.name} 需要修改" + (f"：{comment}" if comment else ""),
+                exclude_user_id=user_id,
+            )
+    else:
+        _notify_scene_assignees(
+            db, scene, "review", f"{scene.name} 的 {stage_key} 被驳回",
+            f"镜头 {scene.name} 的 {stage_key} 阶段被驳回" + (f"：{comment}" if comment else ""),
+            {"scene_id": scene.id, "stage": stage_key}, exclude_user_id=user_id,
+        )
 
     db.commit()
     for r in records:

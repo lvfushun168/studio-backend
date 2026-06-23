@@ -28,6 +28,7 @@ from app.schemas.work_step import (
 )
 from app.services.audit_service import record_audit
 from app.services import work_step_service
+from app.services.notification_service import notify_step_schedule_change
 from app.services.work_step_query_service import aggregate_work_step_inputs, list_work_step_tasks
 from app.services.work_step_service import ensure_default_for_stage, record_work_step_event, stage_key_exists
 
@@ -486,6 +487,11 @@ def create_scene_work_step(
     db.add(work_step)
     db.flush()
     record_work_step_event(db, work_step, current_user.id, "step.create", to_status=initial_status)
+    if work_step.assignee_id:
+        notify_step_schedule_change(
+            db, work_step, old_assignee_id=None, new_assignee_id=work_step.assignee_id,
+            assignee_changed=True, due_changed=work_step.due_at is not None, operator_id=current_user.id,
+        )
     db.commit()
     db.refresh(work_step)
     return work_step
@@ -615,6 +621,7 @@ def update_scene_work_step(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Work step cannot be changed while the stage is reviewing or approved")
     if "assignee_id" in payload.model_fields_set:
         work_step_service.validate_assignee(db, work_step.project_id, payload.assignee_id)
+    old_effective_assignee = work_step_service.get_effective_assignee_id(db, work_step)
     before = {field: getattr(work_step, field) for field in payload.model_fields_set}
     for field in payload.model_fields_set:
         setattr(work_step, field, getattr(payload, field))
@@ -624,6 +631,15 @@ def update_scene_work_step(
         current_user.id,
         "step.assign" if "assignee_id" in payload.model_fields_set and before.get("assignee_id") != payload.assignee_id else "step.update",
         payload_json={"before": {key: str(value) if isinstance(value, datetime) else value for key, value in before.items()}},
+    )
+    new_effective_assignee = work_step_service.get_effective_assignee_id(db, work_step)
+    notify_step_schedule_change(
+        db, work_step,
+        old_assignee_id=old_effective_assignee,
+        new_assignee_id=new_effective_assignee,
+        assignee_changed="assignee_id" in payload.model_fields_set and old_effective_assignee != new_effective_assignee,
+        due_changed="due_at" in payload.model_fields_set and before.get("due_at") != payload.due_at,
+        operator_id=current_user.id,
     )
     db.commit()
     db.refresh(work_step)

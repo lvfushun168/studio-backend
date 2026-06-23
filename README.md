@@ -95,8 +95,13 @@ Full regression flow:
 ```bash
 cd /Users/lvfushun/PycharmProjects/gemini_webapi/backend
 ../.venv/bin/pytest -q
+../.venv/bin/python -m pytest -q -o addopts= tests/test_api_smoke.py
 ../.venv/bin/python -m compileall app tests scripts
 ```
+
+`test_api_smoke.py` owns and destroys a temporary PostgreSQL database, so it is
+run in a fresh Python process. `test_prd5_full.py` is retained only as a legacy
+black-box PRD5 suite and is not part of the PRD6 release gate.
 
 End-to-end migration + seed + regression verification:
 

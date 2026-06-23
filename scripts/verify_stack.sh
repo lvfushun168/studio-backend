@@ -20,10 +20,13 @@ cd "$ROOT_DIR"
 echo "[2/4] Seeding demo data"
 STUDIO_ALLOW_DESTRUCTIVE_SEED=true "$VENV_PYTHON" scripts/seed_data.py
 
-echo "[3/4] Running API regression tests"
-"$ROOT_DIR/.venv/bin/pytest" -q
+echo "[3/5] Running PRD6 and unit regression tests"
+"$VENV_PYTHON" -m pytest -q
 
-echo "[4/4] Compiling sources"
+echo "[4/5] Running isolated API smoke tests"
+"$VENV_PYTHON" -m pytest -q -o addopts= tests/test_api_smoke.py
+
+echo "[5/5] Compiling sources"
 "$VENV_PYTHON" -m compileall app tests scripts
 
 echo "Verification completed successfully."

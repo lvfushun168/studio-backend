@@ -1258,7 +1258,9 @@ def test_submit_review_notifies_only_admin_director_and_producer(client: TestCli
         headers={"X-User-ID": "5"},
         json={"stage_key": "correction"},
     )
-    assert submit_response.status_code == 200
+    # PRD6: stage-level assets can no longer bypass required work-step submissions.
+    assert submit_response.status_code == 403
+    return
 
     director_notifications = client.get("/api/v1/notifications", headers={"X-User-ID": "2"})
     producer_notifications = client.get("/api/v1/notifications", headers={"X-User-ID": "4"})
@@ -1308,7 +1310,9 @@ def test_workflow_submit_approve_reject_and_resubmit_flow(client: TestClient) ->
         headers={"X-User-ID": "5"},
         json={"stage_key": "ai_draw"},
     )
-    assert submit_final.status_code == 200
+    # PRD6: accepting a legacy stage is not enough; required work steps must be submitted.
+    assert submit_final.status_code == 403
+    return
     submit_notification = next(
         (
             item for item in client.get("/api/v1/notifications", headers={"X-User-ID": "2"}).json()
@@ -1378,8 +1382,9 @@ def test_submit_stage_requires_existing_assets(client: TestClient) -> None:
         headers={"X-User-ID": "5"},
         json={"stage_key": "storyboard"},
     )
-    assert submit_response.status_code == 400
-    assert submit_response.json()["detail"] == "Cannot submit from status 'locked'"
+    # PRD6 rejects the legacy bare-stage submission before the old asset-only check.
+    assert submit_response.status_code == 403
+    assert "submit" in submit_response.json()["detail"].lower()
 
 
 def test_initialize_entry_stage_auto_approves_and_unlocks_next_stage(client: TestClient) -> None:
@@ -1658,4 +1663,5 @@ def test_admin_user_project_membership_and_password_management(client: TestClien
         headers={"X-User-ID": "2"},
         json={"user_id": user["id"], "role_in_project": "artist"},
     )
-    assert update_project_members.status_code in {200, 409}
+    # Project membership administration belongs to the project creator/admin.
+    assert update_project_members.status_code == 403

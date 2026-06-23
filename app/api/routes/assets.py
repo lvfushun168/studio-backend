@@ -13,6 +13,7 @@ from app.schemas.activity import ActivityEventRead
 from app.schemas.asset import AssetCreate, AssetRead, AssetUpdate
 from app.services.activity_service import activity_payload, list_asset_activity
 from app.services.audit_service import record_audit
+from app.services.work_step_service import assert_can_execute_step
 
 router = APIRouter()
 
@@ -198,6 +199,8 @@ def create_asset(
             or work_step.stage_key != payload.stage_key
         ):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Work step does not match the asset project, scene and stage")
+        if payload.asset_usage in {"step_draft", "step_submission"}:
+            assert_can_execute_step(db, work_step, current_user)
     group_filter = [
         Asset.project_id == payload.project_id,
         Asset.scene_id == payload.scene_id,

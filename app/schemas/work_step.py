@@ -171,7 +171,7 @@ class SceneWorkStepRead(CamelCaseORMModel):
 
 
 class WorkStepListRead(CamelCaseModel):
-    items: list[SceneWorkStepRead]
+    items: list[dict]
     total: int
 
 
@@ -215,3 +215,27 @@ class StepSubmissionRead(CamelCaseORMModel):
     created_at: datetime
     updated_at: datetime
     assets: list[StepSubmissionAssetRead]
+
+
+class WorkStepBatchUpdate(CamelCaseModel):
+    work_step_ids: list[int] = Field(min_length=1)
+    assignee_id: int | None = None
+    due_at: datetime | None = None
+    priority: Priority | None = None
+    blocked_reason: str | None = Field(default=None, max_length=64)
+    note: str | None = None
+
+
+class ApplyWorkStepTemplateRequest(CamelCaseModel):
+    template_id: int
+    mode: Literal["append", "merge", "replace"] = "merge"
+    preview_only: bool = False
+
+
+class BatchApplyWorkStepTemplateTarget(CamelCaseModel):
+    scene_id: int
+    stage_key: str
+
+
+class BatchApplyWorkStepTemplateRequest(ApplyWorkStepTemplateRequest):
+    targets: list[BatchApplyWorkStepTemplateTarget] = Field(min_length=1)

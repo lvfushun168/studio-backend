@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.domains.stage_templates import STAGE_TEMPLATES
 from app.models.asset import Asset
-from app.models.project import SceneAssignment
+from app.models.project import SceneAssignment, UserProjectMembership
 from app.models.scene import Scene, StageProgress
 from app.models.workflow import WorkflowTemplate
 from app.models.work_step import (
@@ -741,3 +741,234 @@ def complete_entry_steps(
         work_step.status = "done"
         work_step.completed_at = now
         record_work_step_event(db, work_step, operator_id, "step.complete", from_status=previous, to_status="done", comment="Entry stage auto-approved")
+
+
+def _validate_template_for_stage(
+    db: Session,
+    template_id: int,
+    scene: Scene,
+    stage_progress: StageProgress,
+) -> WorkStepTemplate:
+    template = db.scalar(
+        select(WorkStepTemplate)
+        .options(selectinload(WorkStepTemplate.items))
+        .where(WorkStepTemplate.id == template_id)
+    )
+    if not template or not template.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active work step template not found")
+    if template.stage_key != stage_progress.stage_key:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Template stageKey does not match target stage")
+    if template.scope == "project" and template.project_id != scene.project_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Project template does not belong to the target project")
+    return template
+
+
+def _template_item_values(item) -> dict:
+    return {
+        "name": item.name,
+        "description": item.description,
+        "sort_order": item.sort_order,
+        "is_required": item.is_required,
+        "allow_parallel": item.allow_parallel,
+        "metadata_json": dict(item.metadata_json) if item.metadata_json else None,
+    }
+
+
+def preview_template_application(
+    db: Session,
+    scene: Scene,
+    stage_progress: StageProgress,
+    template_id: int,
+    mode: str,
+) -> tuple[WorkStepTemplate, dict]:
+    if stage_progress.status in {"reviewing", "approved"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Cannot apply a template while the stage is reviewing or approved")
+    template = _validate_template_for_stage(db, template_id, scene, stage_progress)
+    existing = list(
+        db.scalars(
+            select(SceneWorkStep)
+            .where(SceneWorkStep.stage_progress_id == stage_progress.id)
+            .order_by(SceneWorkStep.sort_order, SceneWorkStep.id)
+        ).all()
+    )
+    existing_by_key = {item.step_key: item for item in existing}
+    submission_step_ids = set(
+        db.scalars(
+            select(StepSubmission.scene_work_step_id)
+            .where(StepSubmission.stage_progress_id == stage_progress.id)
+            .distinct()
+        ).all()
+    )
+    diff = {"add": [], "update": [], "restore": [], "keep": [], "cancel": []}
+    template_keys = {item.step_key for item in template.items}
+    for item in template.items:
+        current = existing_by_key.get(item.step_key)
+        summary = {"stepKey": item.step_key, "name": item.name, "workStepId": current.id if current else None}
+        if current is None:
+            diff["add"].append(summary)
+        elif current.status == "cancelled":
+            diff["restore"].append(summary)
+        elif mode == "append" or current.id in submission_step_ids:
+            diff["keep"].append(summary)
+        else:
+            values = _template_item_values(item)
+            changes = {
+                field: {"before": getattr(current, field), "after": value}
+                for field, value in values.items()
+                if getattr(current, field) != value
+            }
+            if changes:
+                diff["update"].append({**summary, "changes": changes})
+            else:
+                diff["keep"].append(summary)
+    if mode == "replace":
+        for current in existing:
+            if current.step_key not in template_keys and current.status != "cancelled":
+                diff["cancel"].append({"stepKey": current.step_key, "name": current.name, "workStepId": current.id, "hasSubmissions": current.id in submission_step_ids})
+    return template, {
+        "sceneId": scene.id,
+        "stageKey": stage_progress.stage_key,
+        "stageProgressId": stage_progress.id,
+        "templateId": template.id,
+        "mode": mode,
+        "diff": diff,
+    }
+
+
+def apply_template_to_stage(
+    db: Session,
+    scene: Scene,
+    stage_progress: StageProgress,
+    template_id: int,
+    mode: str,
+    operator_id: int,
+) -> dict:
+    template, preview = preview_template_application(db, scene, stage_progress, template_id, mode)
+    existing = {
+        item.step_key: item
+        for item in db.scalars(select(SceneWorkStep).where(SceneWorkStep.stage_progress_id == stage_progress.id)).all()
+    }
+    changed_steps: list[SceneWorkStep] = []
+    for diff_item in preview["diff"]["cancel"]:
+        current = existing[diff_item["stepKey"]]
+        previous = current.status
+        current.status = "cancelled"
+        current.cancelled_at = datetime.now(timezone.utc)
+        record_work_step_event(db, current, operator_id, "step.cancel", from_status=previous, to_status="cancelled", payload_json={"templateId": template.id})
+        changed_steps.append(current)
+    item_by_key = {item.step_key: item for item in template.items}
+    for category in ("add", "restore", "update"):
+        for diff_item in preview["diff"][category]:
+            source = item_by_key[diff_item["stepKey"]]
+            current = existing.get(source.step_key)
+            if current is None:
+                current = SceneWorkStep(
+                    project_id=scene.project_id,
+                    scene_group_id=scene.scene_group_id,
+                    scene_id=scene.id,
+                    stage_progress_id=stage_progress.id,
+                    stage_key=stage_progress.stage_key,
+                    step_key=source.step_key,
+                    original_name=source.name,
+                    status="not_ready",
+                    priority="normal",
+                    created_by=operator_id,
+                )
+                db.add(current)
+                existing[source.step_key] = current
+            previous_status = current.status
+            current.template_id = template.id
+            current.template_item_id = source.id
+            for field, value in _template_item_values(source).items():
+                setattr(current, field, value)
+            if category == "restore":
+                current.status = "not_ready"
+                current.cancelled_at = None
+            db.flush()
+            record_work_step_event(
+                db,
+                current,
+                operator_id,
+                "template.apply",
+                from_status=previous_status,
+                to_status=current.status,
+                payload_json={"templateId": template.id, "mode": mode, "changeType": category},
+            )
+            changed_steps.append(current)
+    active = next((item for item in existing.values() if item.status != "cancelled"), None)
+    if active:
+        refresh_step_availability(db, active, operator_id)
+    record_audit(
+        db,
+        user_id=operator_id,
+        action="work_step_template.apply",
+        target_type="stage_progress",
+        target_id=stage_progress.id,
+        project_id=scene.project_id,
+        summary=f"应用步骤模板 {template.name} 到 {scene.name}/{stage_progress.stage_key}",
+        payload_json=preview,
+    )
+    return preview
+
+
+def validate_assignee(db: Session, project_id: int, assignee_id: int | None) -> None:
+    if assignee_id is None:
+        return
+    user = db.get(User, assignee_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Assignee is not an active user")
+    membership = db.scalar(
+        select(UserProjectMembership.id).where(
+            UserProjectMembership.project_id == project_id,
+            UserProjectMembership.user_id == assignee_id,
+        ).limit(1)
+    )
+    if membership is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Assignee is not a project member")
+
+
+def batch_update_work_steps(
+    db: Session,
+    work_step_ids: list[int],
+    changes: dict,
+    operator_id: int,
+) -> list[SceneWorkStep]:
+    unique_ids = list(dict.fromkeys(work_step_ids))
+    steps = list(
+        db.scalars(
+            select(SceneWorkStep).where(SceneWorkStep.id.in_(unique_ids)).with_for_update()
+        ).all()
+    )
+    if len(steps) != len(unique_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more work steps were not found")
+    for project_id in {item.project_id for item in steps}:
+        validate_assignee(db, project_id, changes.get("assignee_id")) if "assignee_id" in changes else None
+    for work_step in steps:
+        stage_progress = _stage_progress(db, work_step)
+        if stage_progress.status in {"reviewing", "approved"}:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Work step {work_step.id} belongs to a locked stage")
+        before = {field: getattr(work_step, field) for field in changes}
+        for field, value in changes.items():
+            setattr(work_step, field, value)
+        action = "step.assign" if "assignee_id" in changes and before.get("assignee_id") != changes.get("assignee_id") else "step.update"
+        record_work_step_event(
+            db,
+            work_step,
+            operator_id,
+            action,
+            payload_json={"before": {key: value.isoformat() if isinstance(value, datetime) else value for key, value in before.items()}, "after": {key: value.isoformat() if isinstance(value, datetime) else value for key, value in changes.items()}},
+        )
+        record_audit(
+            db,
+            user_id=operator_id,
+            action=f"work_step.{action.split('.')[-1]}",
+            target_type="scene_work_step",
+            target_id=work_step.id,
+            project_id=work_step.project_id,
+            summary=f"批量更新步骤 {work_step.name}",
+            payload_json={
+                "before": {key: value.isoformat() if isinstance(value, datetime) else value for key, value in before.items()},
+                "after": {key: value.isoformat() if isinstance(value, datetime) else value for key, value in changes.items()},
+            },
+        )
+    return steps

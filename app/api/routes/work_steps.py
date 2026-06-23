@@ -14,9 +14,12 @@ from app.schemas.work_step import (
     SceneWorkStepCreate,
     SceneWorkStepRead,
     SceneWorkStepUpdate,
+    ApplyWorkStepTemplateRequest,
+    BatchApplyWorkStepTemplateRequest,
     StepSubmissionRead,
     StepSubmitRequest,
     WorkStepListRead,
+    WorkStepBatchUpdate,
     WorkStepTemplateCopy,
     WorkStepTemplateCreate,
     WorkStepTemplateItemWrite,
@@ -25,6 +28,7 @@ from app.schemas.work_step import (
 )
 from app.services.audit_service import record_audit
 from app.services import work_step_service
+from app.services.work_step_query_service import list_work_step_tasks
 from app.services.work_step_service import ensure_default_for_stage, record_work_step_event, stage_key_exists
 
 
@@ -319,11 +323,17 @@ def _get_scene_stage(db: Session, scene_id: int, stage_key: str) -> tuple[Scene,
 def list_work_steps(
     current_user: CurrentUser,
     project_id: int | None = None,
+    episode_id: int | None = None,
     scene_group_id: int | None = None,
     scene_id: int | None = None,
     stage_key: str | None = None,
     assignee_id: int | None = None,
-    work_step_status: str | None = Query(default=None, alias="status"),
+    work_step_status: list[str] | None = Query(default=None, alias="status"),
+    overdue_only: bool = False,
+    blocked_only: bool = False,
+    unassigned_only: bool = False,
+    priority: str | None = None,
+    keyword: str | None = None,
     include_cancelled: bool = False,
     db: Session = Depends(get_db),
 ) -> WorkStepListRead:
@@ -335,22 +345,79 @@ def list_work_steps(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
         project_id = scene.project_id
     require_project_access(project_id, current_user, db)
-    stmt = select(SceneWorkStep).where(SceneWorkStep.project_id == project_id)
-    if scene_group_id is not None:
-        stmt = stmt.where(SceneWorkStep.scene_group_id == scene_group_id)
-    if scene_id is not None:
-        stmt = stmt.where(SceneWorkStep.scene_id == scene_id)
-    if stage_key:
-        stmt = stmt.where(SceneWorkStep.stage_key == stage_key)
-    if assignee_id is not None:
-        stmt = stmt.where(SceneWorkStep.assignee_id == assignee_id)
-    if work_step_status:
-        stmt = stmt.where(SceneWorkStep.status == work_step_status)
-    elif not include_cancelled:
-        stmt = stmt.where(SceneWorkStep.status != "cancelled")
-    stmt = stmt.order_by(SceneWorkStep.scene_id, SceneWorkStep.stage_key, SceneWorkStep.sort_order, SceneWorkStep.id)
-    items = list(db.scalars(stmt).all())
-    return WorkStepListRead(items=[SceneWorkStepRead.model_validate(item) for item in items], total=len(items))
+    return WorkStepListRead(**list_work_step_tasks(
+        db,
+        project_id=project_id,
+        episode_id=episode_id,
+        scene_group_id=scene_group_id,
+        scene_id=scene_id,
+        stage_key=stage_key,
+        assignee_id=assignee_id,
+        statuses=work_step_status,
+        overdue_only=overdue_only,
+        blocked_only=blocked_only,
+        unassigned_only=unassigned_only,
+        priority=priority,
+        keyword=keyword,
+        include_cancelled=include_cancelled,
+    ))
+
+
+@work_step_router.post("/batch-update", response_model=list[SceneWorkStepRead])
+def batch_update_scene_work_steps(
+    payload: WorkStepBatchUpdate,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> list[SceneWorkStep]:
+    require_role(PRODUCER_ROLES)(current_user)
+    unique_ids = list(dict.fromkeys(payload.work_step_ids))
+    steps = list(db.scalars(select(SceneWorkStep).where(SceneWorkStep.id.in_(unique_ids))).all())
+    if len(steps) != len(unique_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more work steps were not found")
+    for project_id in {item.project_id for item in steps}:
+        require_project_access(project_id, current_user, db)
+    changes = {
+        field: getattr(payload, field)
+        for field in payload.model_fields_set
+        if field != "work_step_ids"
+    }
+    if not changes:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="At least one update field is required")
+    updated = work_step_service.batch_update_work_steps(db, unique_ids, changes, current_user.id)
+    db.commit()
+    for item in updated:
+        db.refresh(item)
+    return updated
+
+
+@work_step_router.post("/batch-apply-template")
+def batch_apply_work_step_template(
+    payload: BatchApplyWorkStepTemplateRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_role(PRODUCER_ROLES)(current_user)
+    previews = []
+    seen_targets = set()
+    for target in payload.targets:
+        key = (target.scene_id, target.stage_key)
+        if key in seen_targets:
+            continue
+        seen_targets.add(key)
+        scene, stage_progress = _get_scene_stage(db, target.scene_id, target.stage_key)
+        require_project_access(scene.project_id, current_user, db)
+        if payload.preview_only:
+            _, preview = work_step_service.preview_template_application(
+                db, scene, stage_progress, payload.template_id, payload.mode
+            )
+        else:
+            preview = work_step_service.apply_template_to_stage(
+                db, scene, stage_progress, payload.template_id, payload.mode, current_user.id
+            )
+        previews.append(preview)
+    if not payload.preview_only:
+        db.commit()
+    return {"previewOnly": payload.preview_only, "items": previews, "targetCount": len(previews)}
 
 
 @scene_stage_router.get("/{scene_id}/stages/{stage_key}/work-steps", response_model=list[SceneWorkStepRead])
@@ -418,6 +485,29 @@ def create_scene_work_step(
     db.commit()
     db.refresh(work_step)
     return work_step
+
+
+@scene_stage_router.post("/{scene_id}/stages/{stage_key}/work-steps/apply-template")
+def apply_work_step_template(
+    scene_id: int,
+    stage_key: str,
+    payload: ApplyWorkStepTemplateRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> dict:
+    require_role(PRODUCER_ROLES)(current_user)
+    scene, stage_progress = _get_scene_stage(db, scene_id, stage_key)
+    require_project_access(scene.project_id, current_user, db)
+    if payload.preview_only:
+        _, preview = work_step_service.preview_template_application(
+            db, scene, stage_progress, payload.template_id, payload.mode
+        )
+        return {"previewOnly": True, **preview}
+    preview = work_step_service.apply_template_to_stage(
+        db, scene, stage_progress, payload.template_id, payload.mode, current_user.id
+    )
+    db.commit()
+    return {"previewOnly": False, **preview}
 
 
 def _get_work_step(db: Session, work_step_id: int) -> SceneWorkStep:
@@ -508,6 +598,8 @@ def update_scene_work_step(
     stage_progress = db.get(StageProgress, work_step.stage_progress_id)
     if stage_progress and stage_progress.status in {"reviewing", "approved"}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Work step cannot be changed while the stage is reviewing or approved")
+    if "assignee_id" in payload.model_fields_set:
+        work_step_service.validate_assignee(db, work_step.project_id, payload.assignee_id)
     before = {field: getattr(work_step, field) for field in payload.model_fields_set}
     for field in payload.model_fields_set:
         setattr(work_step, field, getattr(payload, field))
@@ -515,7 +607,7 @@ def update_scene_work_step(
         db,
         work_step,
         current_user.id,
-        "step.update",
+        "step.assign" if "assignee_id" in payload.model_fields_set and before.get("assignee_id") != payload.assignee_id else "step.update",
         payload_json={"before": {key: str(value) if isinstance(value, datetime) else value for key, value in before.items()}},
     )
     db.commit()

@@ -15,6 +15,7 @@ from app.api.routes import (
     notifications,
     prompts,
     progress,
+    production_matrix,
     projects,
     references,
     scene_groups,
@@ -52,6 +53,7 @@ api_router.include_router(bank.router, prefix="/bank", tags=["bank"])
 api_router.include_router(references.router, prefix="/references", tags=["references"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(progress.router, prefix="/progress", tags=["progress"])
+api_router.include_router(production_matrix.router, prefix="/production-matrix", tags=["production-matrix"])
 api_router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 api_router.include_router(prompts.router, prefix="/prompts", tags=["prompts"])
 api_router.include_router(image_groups.router, prefix="/image-groups", tags=["image-groups"])

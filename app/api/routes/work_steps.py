@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.auth import ADMIN_ROLES, CurrentUser, PRODUCER_ROLES, require_project_access, require_role
+from app.core.auth import ADMIN_ROLES, CurrentUser, PRODUCER_ROLES, get_accessible_project_ids, require_project_access, require_role
 from app.core.database import get_db
 from app.models.scene import Scene, StageProgress
 from app.models.work_step import SceneWorkStep, WorkStepTemplate, WorkStepTemplateItem
@@ -28,7 +28,7 @@ from app.schemas.work_step import (
 )
 from app.services.audit_service import record_audit
 from app.services import work_step_service
-from app.services.work_step_query_service import list_work_step_tasks
+from app.services.work_step_query_service import aggregate_work_step_inputs, list_work_step_tasks
 from app.services.work_step_service import ensure_default_for_stage, record_work_step_event, stage_key_exists
 
 
@@ -328,6 +328,7 @@ def list_work_steps(
     scene_id: int | None = None,
     stage_key: str | None = None,
     assignee_id: int | None = None,
+    mine_only: bool = False,
     work_step_status: list[str] | None = Query(default=None, alias="status"),
     overdue_only: bool = False,
     blocked_only: bool = False,
@@ -337,22 +338,25 @@ def list_work_steps(
     include_cancelled: bool = False,
     db: Session = Depends(get_db),
 ) -> WorkStepListRead:
-    if project_id is None and scene_id is None:
+    if project_id is None and scene_id is None and not mine_only:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="project_id or scene_id is required")
     if scene_id is not None:
         scene = db.get(Scene, scene_id)
         if not scene:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
         project_id = scene.project_id
-    require_project_access(project_id, current_user, db)
+    if project_id is not None:
+        require_project_access(project_id, current_user, db)
+    project_ids = None if project_id is not None or current_user.role == "admin" else get_accessible_project_ids(current_user, db)
     return WorkStepListRead(**list_work_step_tasks(
         db,
         project_id=project_id,
+        project_ids=project_ids,
         episode_id=episode_id,
         scene_group_id=scene_group_id,
         scene_id=scene_id,
         stage_key=stage_key,
-        assignee_id=assignee_id,
+        assignee_id=current_user.id if mine_only else assignee_id,
         statuses=work_step_status,
         overdue_only=overdue_only,
         blocked_only=blocked_only,
@@ -537,6 +541,17 @@ def list_step_submissions(
     work_step = _get_work_step(db, work_step_id)
     require_project_access(work_step.project_id, current_user, db)
     return work_step_service.list_submissions(db, work_step.id)
+
+
+@work_step_router.get("/{work_step_id}/input-assets")
+def get_work_step_input_assets(
+    work_step_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> dict:
+    work_step = _get_work_step(db, work_step_id)
+    require_project_access(work_step.project_id, current_user, db)
+    return aggregate_work_step_inputs(db, work_step)
 
 
 @work_step_router.post("/{work_step_id}/start", response_model=SceneWorkStepRead)

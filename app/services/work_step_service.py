@@ -20,6 +20,7 @@ from app.models.work_step import (
     WorkStepTemplate,
 )
 from app.models.user import User
+from app.schemas.scene import SceneWorkStepPlan
 from app.services.audit_service import record_audit
 from app.services.notification_service import notify_step_schedule_change, notify_users_for_step, project_role_user_ids
 
@@ -118,7 +119,7 @@ def _build_from_template(
             stage_progress_id=stage_progress.id,
             stage_key=stage_progress.stage_key,
             template_id=template.id if template else None,
-            template_item_id=item.id if item else None,
+            template_item_id=getattr(item, "id", None) if item else None,
             step_key=item.step_key if item else DEFAULT_STEP_KEY,
             name=item.name if item else DEFAULT_STEP_NAME,
             original_name=item.name if item else DEFAULT_STEP_NAME,
@@ -191,6 +192,7 @@ def materialize_scene_work_steps(
     operator_id: int,
     *,
     copy_from_scene_id: int | None = None,
+    work_step_plans: dict[str, SceneWorkStepPlan] | None = None,
 ) -> list[SceneWorkStep]:
     if copy_from_scene_id is not None:
         source_scene = db.get(Scene, copy_from_scene_id)
@@ -208,8 +210,23 @@ def materialize_scene_work_steps(
             else []
         )
         if not steps:
-            template = get_applicable_template(db, scene.project_id, stage_progress.stage_key)
-            steps = _build_from_template(scene, stage_progress, template, operator_id)
+            plan = (work_step_plans or {}).get(stage_progress.stage_key)
+            template = None
+            if plan and plan.mode == "template":
+                template = _get_template_for_scene_plan(db, scene, stage_progress, plan.template_id)
+                steps = _build_from_template(scene, stage_progress, template, operator_id)
+            elif plan and plan.mode == "manual":
+                steps = _build_from_items(scene, stage_progress, plan.items or [], operator_id)
+            elif plan and plan.mode == "stage_delivery":
+                steps = _build_from_template(scene, stage_progress, None, operator_id)
+            else:
+                template = get_applicable_template(db, scene.project_id, stage_progress.stage_key)
+                if template is None and work_step_plans is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"workStepPlans.{stage_progress.stage_key} is required because this stage has no default template",
+                    )
+                steps = _build_from_template(scene, stage_progress, template, operator_id)
         db.add_all(steps)
         db.flush()
         for work_step in steps:
@@ -223,6 +240,60 @@ def materialize_scene_work_steps(
             )
         created.extend(steps)
     return created
+
+
+def _get_template_for_scene_plan(
+    db: Session,
+    scene: Scene,
+    stage_progress: StageProgress,
+    template_id: int | None,
+) -> WorkStepTemplate:
+    template = db.scalar(
+        select(WorkStepTemplate)
+        .options(selectinload(WorkStepTemplate.items))
+        .where(WorkStepTemplate.id == template_id, WorkStepTemplate.is_active.is_(True))
+    )
+    if (
+        not template
+        or template.stage_key != stage_progress.stage_key
+        or (template.scope == "project" and template.project_id != scene.project_id)
+        or (template.scope == "system" and template.project_id is not None)
+    ):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid work step template for scene stage")
+    return template
+
+
+def _build_from_items(
+    scene: Scene,
+    stage_progress: StageProgress,
+    items,
+    operator_id: int,
+) -> list[SceneWorkStep]:
+    if not items:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Manual work step plan requires at least one item")
+    result: list[SceneWorkStep] = []
+    for index, item in enumerate(items):
+        result.append(
+            SceneWorkStep(
+                project_id=scene.project_id,
+                scene_group_id=scene.scene_group_id,
+                scene_id=scene.id,
+                stage_progress_id=stage_progress.id,
+                stage_key=stage_progress.stage_key,
+                step_key=item.step_key,
+                name=item.name,
+                original_name=item.name,
+                description=item.description,
+                sort_order=item.sort_order,
+                is_required=item.is_required,
+                allow_parallel=item.allow_parallel,
+                status=_initial_status(stage_progress.status, index=index, allow_parallel=item.allow_parallel),
+                priority="normal",
+                created_by=operator_id,
+                metadata_json=dict(item.metadata_json) if item.metadata_json else None,
+            )
+        )
+    return result
 
 
 def ensure_default_for_stage(

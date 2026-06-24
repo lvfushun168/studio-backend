@@ -190,6 +190,7 @@ def create_scene(
         stage_progresses,
         current_user.id,
         copy_from_scene_id=payload.copy_work_steps_from_scene_id,
+        work_step_plans=payload.work_step_plans,
     )
 
     record_audit(

@@ -167,3 +167,43 @@ def test_m6_forward_reverse_batch_and_permissions(m6_client):
     progress = ok(client.get(f"/api/v1/progress/projects/{project.id}/work-steps"))
     assert matrix["summary"]["sceneCount"] == 1
     assert progress["summary"]["totalScenes"] == 1
+
+
+def test_scene_creation_requires_explicit_plan_for_stages_without_defaults(m6_client):
+    client, current, producer, _director, _artist, project, group = m6_client
+    current["user"] = producer
+    plans = {
+        "storyboard": {"mode": "stage_delivery"},
+        "ai_draw": {
+            "mode": "manual",
+            "items": [
+                {"stepKey": "draft", "name": "草稿", "sortOrder": 10},
+                {"stepKey": "polish", "name": "精修", "sortOrder": 20},
+            ],
+        },
+        "correction": {"mode": "stage_delivery"},
+        "final": {"mode": "stage_delivery"},
+    }
+    scene = ok(client.post("/api/v1/scenes", json={
+        "projectId": project.id,
+        "sceneGroupId": group.id,
+        "name": "SC-M6-PLAN",
+        "stageTemplate": "ai_single_frame",
+        "pipeline": "ai_single_frame",
+        "workStepPlans": plans,
+    }))
+    ai_steps = ok(client.get(f"/api/v1/scenes/{scene['id']}/stages/ai_draw/work-steps"))
+    assert [(item["stepKey"], item["name"]) for item in ai_steps] == [("draft", "草稿"), ("polish", "精修")]
+    storyboard_steps = ok(client.get(f"/api/v1/scenes/{scene['id']}/stages/storyboard/work-steps"))
+    assert storyboard_steps[0]["stepKey"] == "stage_delivery"
+
+    missing_plan = client.post("/api/v1/scenes", json={
+        "projectId": project.id,
+        "sceneGroupId": group.id,
+        "name": "SC-M6-MISSING-PLAN",
+        "stageTemplate": "ai_single_frame",
+        "pipeline": "ai_single_frame",
+        "workStepPlans": {},
+    })
+    assert missing_plan.status_code == 422
+    assert "workStepPlans.storyboard" in missing_plan.json()["detail"]

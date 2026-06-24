@@ -1,8 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, computed_field
+from typing import Literal
+
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from app.schemas.common import CamelCaseModel, CamelCaseORMModel
+from app.schemas.work_step import WorkStepTemplateItemWrite
 
 
 class StageProgressRead(CamelCaseORMModel):
@@ -33,6 +36,20 @@ class SceneAssignmentRead(CamelCaseORMModel):
     assigned_at: datetime
 
 
+class SceneWorkStepPlan(CamelCaseModel):
+    mode: Literal["template", "manual", "stage_delivery"]
+    template_id: int | None = None
+    items: list[WorkStepTemplateItemWrite] | None = None
+
+    @model_validator(mode="after")
+    def validate_plan(self):
+        if self.mode == "template" and self.template_id is None:
+            raise ValueError("templateId is required when mode is template")
+        if self.mode == "manual" and not self.items:
+            raise ValueError("items are required when mode is manual")
+        return self
+
+
 class SceneCreate(CamelCaseModel):
     project_id: int
     scene_group_id: int
@@ -46,6 +63,7 @@ class SceneCreate(CamelCaseModel):
     sort_order: int = 0
     base_scene_id: int | None = None
     copy_work_steps_from_scene_id: int | None = None
+    work_step_plans: dict[str, SceneWorkStepPlan] | None = None
     created_by: int | None = None
 
 

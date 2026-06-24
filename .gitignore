@@ -38,10 +38,7 @@ ENV/
 *.sqlite3
 
 # Runtime media and generated files
-storage/generated/
-storage/projects/
-storage/exports/
-storage/_health/
+storage/
 backups/
 logs/
 *.log

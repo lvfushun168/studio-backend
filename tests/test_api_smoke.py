@@ -519,6 +519,33 @@ def test_project_workflow_template_can_drive_scene_flow_and_freeze_structure(cli
     assert delete_response.status_code == 409
 
 
+def test_workflow_template_generates_stable_key_for_custom_stage(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/workflow-templates",
+        headers={"X-User-ID": "4"},
+        json={
+            "project_id": 1,
+            "name": "自动标识流程",
+            "steps": [
+                {"key": "storyboard", "label": "分镜", "needs_review": True},
+                {"label": "客户确认", "needs_review": True},
+            ],
+        },
+    )
+    assert response.status_code == 201
+    custom_stage = response.json()["steps"][1]
+    assert custom_stage["label"] == "客户确认"
+    assert custom_stage["key"].startswith("custom_")
+
+    listed = client.get(
+        "/api/v1/workflow-templates",
+        params={"project_id": 1},
+        headers={"X-User-ID": "4"},
+    )
+    persisted = next(item for item in listed.json() if item["id"] == response.json()["id"])
+    assert persisted["steps"][1]["key"] == custom_stage["key"]
+
+
 def test_global_workflow_template_can_seed_new_project_templates(client: TestClient) -> None:
     producer_headers = {"X-User-ID": "4"}
     director_headers = {"X-User-ID": "2"}

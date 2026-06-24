@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -99,6 +100,13 @@ def clone_stage_steps(items: list[dict]) -> list[dict]:
     return [dict(item) for item in items]
 
 
+def _generate_custom_stage_key(seen_keys: set[str]) -> str:
+    while True:
+        key = f"custom_{uuid.uuid4().hex[:12]}"
+        if key not in seen_keys:
+            return key
+
+
 def validate_stage_steps(steps: list[dict]) -> list[dict]:
     if not steps:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Workflow template must contain at least one step")
@@ -108,18 +116,18 @@ def validate_stage_steps(steps: list[dict]) -> list[dict]:
     normalized: list[dict] = []
     seen_keys: set[str] = set()
     for index, raw_step in enumerate(steps):
-        key = str(raw_step.get("key") or "").strip()
+        key = str(raw_step.get("key") or "").strip() or _generate_custom_stage_key(seen_keys)
         label = str(raw_step.get("label") or "").strip()
         needs_review = bool(raw_step.get("needs_review", True))
         sub_track = raw_step.get("sub_track")
         if not STAGE_KEY_PATTERN.match(key):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid step key at position {index + 1}: {key or '<empty>'}")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid stage key at position {index + 1}: {key}")
         if not label:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Step label is required at position {index + 1}")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Stage name is required at position {index + 1}")
         if key in seen_keys:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Duplicate step key: {key}")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Duplicate stage key: {key}")
         if not needs_review:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Step '{key}' must require review in the current workflow engine")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Stage '{key}' must require review in the current workflow engine")
         seen_keys.add(key)
         normalized.append(
             {

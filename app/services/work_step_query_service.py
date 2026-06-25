@@ -124,6 +124,7 @@ def list_work_step_tasks(
             "stageProgressId": progress.id,
             "stageKey": work_step.stage_key,
             "stageLabel": template_cache[scene.stage_template].get(work_step.stage_key, work_step.stage_key),
+            "stageStatus": progress.status,
             "stepKey": work_step.step_key,
             "name": work_step.name,
             "description": work_step.description,

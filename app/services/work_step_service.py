@@ -71,10 +71,10 @@ def get_applicable_template(db: Session, project_id: int, stage_key: str) -> Wor
     )
 
 
-def _initial_status(stage_status: str, *, index: int, allow_parallel: bool) -> str:
+def _initial_status(stage_status: str, *, index: int) -> str:
     if stage_status == "locked":
         return "not_ready"
-    return "todo" if index == 0 or allow_parallel else "not_ready"
+    return "todo" if index == 0 else "not_ready"
 
 
 def record_work_step_event(
@@ -126,11 +126,10 @@ def _build_from_template(
             description=item.description if item else None,
             sort_order=item.sort_order if item else 10,
             is_required=item.is_required if item else True,
-            allow_parallel=item.allow_parallel if item else False,
+            allow_parallel=False,
             status=_initial_status(
                 stage_progress.status,
                 index=index,
-                allow_parallel=item.allow_parallel if item else False,
             ),
             priority="normal",
             created_by=operator_id,
@@ -175,8 +174,8 @@ def _build_from_scene(
                 description=source.description,
                 sort_order=source.sort_order,
                 is_required=source.is_required,
-                allow_parallel=source.allow_parallel,
-                status=_initial_status(stage_progress.status, index=index, allow_parallel=source.allow_parallel),
+                allow_parallel=False,
+                status=_initial_status(stage_progress.status, index=index),
                 priority="normal",
                 created_by=operator_id,
                 metadata_json=dict(source.metadata_json) if source.metadata_json else None,
@@ -286,8 +285,8 @@ def _build_from_items(
                 description=item.description,
                 sort_order=item.sort_order,
                 is_required=item.is_required,
-                allow_parallel=item.allow_parallel,
-                status=_initial_status(stage_progress.status, index=index, allow_parallel=item.allow_parallel),
+                allow_parallel=False,
+                status=_initial_status(stage_progress.status, index=index),
                 priority="normal",
                 created_by=operator_id,
                 metadata_json=dict(item.metadata_json) if item.metadata_json else None,
@@ -431,7 +430,7 @@ def refresh_step_availability(db: Session, work_step: SceneWorkStep, operator_id
         if candidate.status not in {"not_ready", "todo"}:
             continue
         required_predecessors = [item for item in steps[:index] if item.is_required]
-        available = candidate.allow_parallel or all(
+        available = all(
             item.status in {"submitted", "done"} for item in required_predecessors
         )
         next_status = "todo" if available else "not_ready"
@@ -848,7 +847,7 @@ def _template_item_values(item) -> dict:
         "description": item.description,
         "sort_order": item.sort_order,
         "is_required": item.is_required,
-        "allow_parallel": item.allow_parallel,
+        "allow_parallel": False,
         "metadata_json": dict(item.metadata_json) if item.metadata_json else None,
     }
 

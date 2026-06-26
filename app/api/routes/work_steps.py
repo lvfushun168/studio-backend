@@ -107,7 +107,7 @@ def _replace_template_items(template: WorkStepTemplate, items: list[WorkStepTemp
     for payload in items:
         item = existing.pop(payload.step_key, None) or WorkStepTemplateItem(step_key=payload.step_key)
         for field, value in payload.model_dump().items():
-            setattr(item, field, value)
+            setattr(item, field, False if field == "allow_parallel" else value)
         next_items.append(item)
     template.items = next_items
 
@@ -294,7 +294,7 @@ def copy_work_step_template(
             description=item.description,
             sort_order=item.sort_order,
             is_required=item.is_required,
-            allow_parallel=item.allow_parallel,
+            allow_parallel=False,
             default_duration_hours=item.default_duration_hours,
             default_role=item.default_role,
             metadata_json=dict(item.metadata_json) if item.metadata_json else None,
@@ -472,7 +472,9 @@ def create_scene_work_step(
             SceneWorkStep.status != "cancelled",
         ).limit(1)
     ) is not None
-    initial_status = "not_ready" if stage_progress.status == "locked" else ("todo" if payload.allow_parallel or not has_active else "not_ready")
+    initial_status = "not_ready" if stage_progress.status == "locked" else ("todo" if not has_active else "not_ready")
+    work_step_values = payload.model_dump()
+    work_step_values["allow_parallel"] = False
     work_step = SceneWorkStep(
         project_id=scene.project_id,
         scene_group_id=scene.scene_group_id,
@@ -482,7 +484,7 @@ def create_scene_work_step(
         original_name=payload.name,
         status=initial_status,
         created_by=current_user.id,
-        **payload.model_dump(),
+        **work_step_values,
     )
     db.add(work_step)
     db.flush()
@@ -624,7 +626,7 @@ def update_scene_work_step(
     old_effective_assignee = work_step_service.get_effective_assignee_id(db, work_step)
     before = {field: getattr(work_step, field) for field in payload.model_fields_set}
     for field in payload.model_fields_set:
-        setattr(work_step, field, getattr(payload, field))
+        setattr(work_step, field, False if field == "allow_parallel" else getattr(payload, field))
     record_work_step_event(
         db,
         work_step,
